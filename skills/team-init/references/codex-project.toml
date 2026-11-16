@@ -1,0 +1,8 @@
+# agent-team: Codex settings for the hands-off middle of team-build.
+# Workspace writes allowed, network on (git push / gh pr create), ask only when leaving the sandbox.
+# Check key names against the current Codex config docs if Codex rejects them.
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+network_access = true
