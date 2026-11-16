@@ -1,6 +1,6 @@
 # Reference
 
-Technical details for agent-team. For the overview, see the [README](../README.md).
+Technical details for solo-squad. For the overview, see the [README](../README.md).
 
 ## Install (on every machine)
 
@@ -13,7 +13,7 @@ pip install pyyaml            # for the Codex profiles step
 `install.sh` links the skills into `~/.claude/skills` and `~/.agents/skills` (read by Codex and other tools), puts the **`agent-team` helper CLI** on your PATH (`~/.local/bin`), and writes `at-deep` / `at-standard` / `at-fast` profiles (model + reasoning effort) into `~/.codex/config.toml` without touching your other settings. It's safe to re-run; `git pull` + re-run to update.
 
 Alternatives (both skip the PATH step — the workflows then call `python3 <team-build skill>/scripts/agent_team.py`, which asks for permission the first time):
-- **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add mishraaditya595/agent-team`, then `/plugin install agent-team@agent-team`.
+- **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add mishraaditya595/agent-team`, then `/plugin install solo-squad@solo-squad`.
 - **Any Agent Skills tool:** `npx skills add mishraaditya595/agent-team`.
 
 ## First run in a product repo

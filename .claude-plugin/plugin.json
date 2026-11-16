@@ -1,6 +1,6 @@
 {
-  "name": "agent-team",
-  "version": "0.2.0",
+  "name": "solo-squad",
+  "version": "0.3.0",
   "description": "A portable AI product team: PM, Tech Lead, Developer, Reviewer, QA and Marketing, with cost-aware model tiers.",
   "author": { "name": "Aditya Mishra", "url": "https://github.com/mishraaditya595" },
   "license": "MIT",

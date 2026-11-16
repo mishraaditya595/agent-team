@@ -76,7 +76,7 @@ def test_plugin_manifests_parse():
     from conftest import ROOT
     plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
     market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
-    assert plugin["name"] == "agent-team" == market["plugins"][0]["name"]
+    assert plugin["name"] == "solo-squad" == market["plugins"][0]["name"]
 
 
 def test_models_yaml_missing_tool(make_repo):
