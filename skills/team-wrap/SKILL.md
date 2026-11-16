@@ -14,7 +14,7 @@ Closes a merged feature so the next one starts cleaner. Run it on a standard-tie
 3. **Clean up:** `agent-team cleanup <slug> --remote` — removes this machine's worktree, the local branch and the merged remote branch. It refuses if that would lose anything (uncommitted changes, commits that are neither pushed nor in the merged PR): then stop and show the owner its message; use `--force` only if they say so. (Other machines' worktrees are cleaned when they run `git worktree prune`.)
 4. **Mark it shipped:** `agent-team status <slug> --set stage=merged owner=none` and `agent-team idea <slug> --set shipped`.
 5. **Retro → lessons.** Read this feature's `review-*.md`, `qa-*.md` and the `status.md` log, then `.agent-team/lessons.md` (create it from `references/lessons-template.md` if missing). Add **at most 3** lessons, only patterns likely to recur in future features of this product:
-   - a must-fix finding that took more than one round, or the same kind of finding in several places;
+   - a Critical or Important finding that took more than one round, or the same kind of finding in several places;
    - a QA bug whose cause is a project convention or a trap in the codebase;
    - a task tagged `[fast]` that had to escalate, and why;
    - a stop reason and what would have prevented it.

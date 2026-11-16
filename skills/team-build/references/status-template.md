@@ -1,9 +1,10 @@
 <!-- .agent-team/features/<slug>/status.md — the workflow's memory; any machine resumes from it. Edit with `agent-team status <slug> --set key=value`. -->
-stage: spec            # spec | plan | implement | review | qa | pr | ci | pr-open | merged | marketed | stopped
+stage: spec            # spec | grill | plan | implement | review | qa | pr | ci | pr-open | merged | marketed | stopped
 branch: feature/<slug>
 pr: none               # PR number once opened
 owner: none            # "<host> <utc time>" while a machine runs it (lease); none when idle
 worktree: .agent-team/worktrees/<slug>
+grill_round: 0
 review_round: 0
 qa_round: 0
 ci_round: 0

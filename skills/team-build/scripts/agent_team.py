@@ -31,8 +31,8 @@ PROTECTED = re.compile(r"protected branch|GH006|GH013|repository rule|required s
 POLL_SECONDS = 15
 
 TIERS = ("deep", "standard", "fast")
-STAGES = ("spec", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
-STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "review_round", "qa_round", "ci_round",
+STAGES = ("spec", "grill", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
+STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
                "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro")
 IDEA_STATUSES = ("proposed", "shipped", "rejected")   # in progress = a feature/<slug> branch exists
 LEASE_TTL_HOURS = 6   # a lease older than this (no log/commit since) counts as abandoned
@@ -43,8 +43,8 @@ GENERATED = ("*.g.dart", "*.freezed.dart", "*.mocks.dart", "*.gr.dart", "*.pb.go
              "*.min.css", "*.map")
 CHECKBOX = re.compile(r"^\s*- \[( |x|X)\]")
 TASK_LINE = re.compile(r"^\s*- \[( |x|X)\] (T\d+)\b(?:\s+\[([^\]]*)\])?", re.I)
-ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm"}
-ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing")
+ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm", "marketing-topic": "marketing"}
+ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing", "marketing-topic")
 
 
 class Fail(Exception):
@@ -457,6 +457,8 @@ def rule_tier(role, slug, task=None, escalate=False):
         return "standard", f"diff {lines} lines, {files} files"
     if role == "qa":
         return ("standard", "plan says qa-ui: yes") if plan_flag(read("plan.md"), "qa-ui") else ("fast", "no UI checks")
+    if role == "marketing-topic":
+        return "standard", "owner's topic"
     if role == "marketing":
         return ("deep", "launch: true") if re.search(r"launch:\s*true", read("spec.md")) else ("standard", "default")
     raise Fail(f"unknown role '{role}' (known: {', '.join(ROLES)})")
@@ -667,7 +669,7 @@ def cmd_lease(a):
 
 def cmd_tier(a):
     tool = a.tool or os.environ.get("AGENT_TEAM_TOOL", "claude")
-    if not a.slug and a.role not in ("pm-ideate", "pm-intake"):
+    if not a.slug and a.role not in ("pm-ideate", "pm-intake", "marketing-topic"):
         raise Fail(f"tier {a.role} needs the feature slug: agent-team tier {a.role} <slug>")
     r = pick(a.role, a.slug, tool, a.task, a.escalate)
     print(f"tier={r['tier']} model={r['model']} effort={r['effort']} reason={r['reason']}")
@@ -847,6 +849,20 @@ def github_blob_base(wt, branch):
     return f"https://github.com/{m.group(1)}/blob/{branch}/" if m else ""
 
 
+def _section_lines(path, heading):
+    if not path.exists():
+        return []
+    m = re.search(rf"^## {heading}\s*$(.*?)(?=^## |\Z)", path.read_text(), re.M | re.S)
+    return [l.strip() for l in m.group(1).splitlines() if l.strip().startswith("- ")] if m else []
+
+
+def _decisions_to_check(fd):
+    """Assumed grill answers (spec.md ## Decisions) and developer rulings (plan.md ## Rulings)."""
+    assumed = [l for l in _section_lines(fd / "spec.md", "Decisions") if "(assumed)" in l]
+    rulings = [l for l in _section_lines(fd / "plan.md", "Rulings") if "Ruling:" in l]
+    return assumed + rulings
+
+
 def cmd_pr_body(a):
     wt = work_dir(a.slug)
     fd = feature_dir(wt, a.slug)
@@ -858,7 +874,12 @@ def cmd_pr_body(a):
     if a.stopped:
         parts.append(f"> **Stopped — needs your decision:** {a.stopped}\n")
     parts.append("## Summary\n" + (a.summary or "<!-- 3 lines -->"))
-    parts.append("## Artifacts\n" + "\n".join(f"- {link(n)}" for n in ["spec.md", "plan.md", *reports]))
+    grill = ["grill.md"] if (fd / "grill.md").exists() else []
+    parts.append("## Artifacts\n" + "\n".join(f"- {link(n)}" for n in ["spec.md", *grill, "plan.md", *reports]))
+    checks = _decisions_to_check(fd)
+    if checks:
+        parts.append("## Decisions to check\nCalls the agents made on your behalf — assumed grill answers and "
+                     "the developer's rulings.\n" + "\n".join(checks))
     st = fd / "status.md"
     log = st.read_text().split("## Log", 1)[1].strip() if st.exists() and "## Log" in st.read_text() else ""
     log = "\n".join(l for l in log.splitlines() if not l.startswith("<!--"))

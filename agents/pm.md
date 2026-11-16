@@ -1,6 +1,6 @@
 ---
 name: pm
-description: agent-team pm role. Use when an existing product needs new feature ideas or product-level enhancements proposed, when the owner's own idea needs shaping into an ideas.md entry, or when a chosen idea needs a product spec with testable acceptance criteria.
+description: agent-team pm role. Use when an existing product needs new feature ideas or product-level enhancements proposed, when the owner's own idea needs shaping into an ideas.md entry, when a chosen idea needs a product spec with testable acceptance criteria, or when the Tech Lead's grill questions on a spec need answering.
 model: opus
 ---
 
