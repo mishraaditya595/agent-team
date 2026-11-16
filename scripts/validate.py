@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate agent-team skills and model config. Usage: python scripts/validate.py [root]"""
+import re
 import sys
 from pathlib import Path
 
@@ -7,15 +8,32 @@ import yaml
 
 TIERS = ("deep", "standard", "fast")
 TOOLS = ("claude", "codex", "gemini")
+EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
 TOP_LEVEL = {"name", "description", "license", "metadata"}
 KINDS = {"role", "workflow", "guideline"}
 ROLE_HEADINGS = ("## Reads", "## Writes", "## Never")
 ROLE_MAX_LINES = 150
+MODELS_REL = Path("skills") / "team-build" / "references" / "models.yaml"
+STATUS_REL = Path("skills") / "team-build" / "references" / "status-template.md"
+CLI_REL = Path("skills") / "team-build" / "scripts" / "agent_team.py"
+# A file path a skill tells the agent to open, e.g. `references/plan-template.md` or scripts/agent_team.py.
+REF_PATH = re.compile(r"(?<![\w/.-])((?:references|scripts)/[\w.-]+\.\w+)")
+
+
+def models_path(root: Path) -> Path:
+    return Path(root) / MODELS_REL
+
+
+def _load(path: Path) -> dict:
+    return yaml.safe_load(Path(path).read_text()) or {}
 
 
 def load_models(path: Path) -> dict[str, dict[str, str]]:
-    data = yaml.safe_load(path.read_text()) or {}
-    return data.get("tools") or {}
+    return _load(path).get("tools") or {}
+
+
+def load_effort(path: Path) -> dict[str, str]:
+    return _load(path).get("effort") or {}
 
 
 def parse_frontmatter(text: str):
@@ -30,9 +48,11 @@ def parse_frontmatter(text: str):
 
 
 def _check_models(root: Path) -> list[str]:
-    path = root / "config" / "models.yaml"
+    path = models_path(root)
     if not path.exists():
-        return ["models.yaml: missing config/models.yaml"]
+        return [f"models.yaml: missing {MODELS_REL}"]
+    if path.is_symlink():
+        return [f"models.yaml: {MODELS_REL} must be a real file, not a link"]
     errors = []
     tools = load_models(path)
     for tool in TOOLS:
@@ -42,10 +62,28 @@ def _check_models(root: Path) -> list[str]:
         for tier in TIERS:
             if not (tiers or {}).get(tier):
                 errors.append(f"models.yaml: tool '{tool}' missing tier '{tier}'")
+    effort = load_effort(path)
+    for tier, value in effort.items():
+        if tier not in TIERS:
+            errors.append(f"models.yaml: effort for unknown tier '{tier}'")
+        elif value not in EFFORTS:
+            errors.append(f"models.yaml: effort '{value}' for '{tier}' not one of {list(EFFORTS)}")
     return errors
 
 
-def _check_skill(skill_md: Path) -> list[str]:
+def _check_refs(root: Path, skill_md: Path, text: str) -> list[str]:
+    """Every references/... or scripts/... path a skill mentions exists in that skill or another skill."""
+    errors = []
+    skills = Path(root) / "skills"
+    for rel in sorted(set(REF_PATH.findall(text))):
+        if (skill_md.parent / rel).exists():
+            continue
+        if not any((d / rel).exists() for d in skills.iterdir() if d.is_dir()):
+            errors.append(f"skills/{skill_md.parent.name}: mentions '{rel}' but no skill has it")
+    return errors
+
+
+def _check_skill(root: Path, skill_md: Path) -> list[str]:
     folder = skill_md.parent.name
     where = f"skills/{folder}"
     text = skill_md.read_text()
@@ -74,26 +112,44 @@ def _check_skill(skill_md: Path) -> list[str]:
         n = len(text.splitlines())
         if n > ROLE_MAX_LINES:
             errors.append(f"{where}: {n} lines exceeds {ROLE_MAX_LINES} lines")
+    errors += _check_refs(root, skill_md, text)
     return errors
 
 
-def _check_agents(root: Path, roles: dict[str, str]) -> list[str]:
-    """Claude subagent files: one per role, model = models.yaml claude[role tier]."""
+def _check_agents(root: Path, roles: dict[str, dict]) -> list[str]:
+    """Claude subagent files: one per role, model = models.yaml claude[role tier], same description as the skill."""
     agents = root / "agents"
     if not agents.is_dir():
         return []
-    claude = load_models(root / "config" / "models.yaml").get("claude") or {}
+    claude = load_models(models_path(root)).get("claude") or {}
     errors = []
-    for name, tier in roles.items():
+    for name, info in roles.items():
         path = agents / f"{name}.md"
         if not path.exists():
             errors.append(f"agents/{name}.md: missing")
             continue
         fm = parse_frontmatter(path.read_text()) or {}
-        want = claude.get(tier)
+        want = claude.get(info["tier"])
         if fm.get("model") != want:
             errors.append(f"agents/{name}.md: model '{fm.get('model')}' != '{want}'")
+        desc = str(fm.get("description", ""))
+        if info["description"] and info["description"] not in desc:
+            errors.append(f"agents/{name}.md: description doesn't match skills/{name} description")
     return errors
+
+
+def _check_status_schema(root: Path) -> list[str]:
+    """The status template's keys are exactly the keys the helper CLI accepts."""
+    tpl, cli = root / STATUS_REL, root / CLI_REL
+    if not (tpl.exists() and cli.exists()):
+        return []
+    head = tpl.read_text().split("\n## Log", 1)[0]
+    keys = {m.group(1) for m in re.finditer(r"^([a-z_]+):", head, re.M)}
+    m = re.search(r"STATUS_KEYS = \((.*?)\)", cli.read_text(), re.S)
+    known = set(re.findall(r'"([a-z_]+)"', m.group(1))) if m else set()
+    if keys != known:
+        return [f"status-template.md keys {sorted(keys)} != agent_team.py STATUS_KEYS {sorted(known)}"]
+    return []
 
 
 def validate_repo(root: Path) -> list[str]:
@@ -101,13 +157,15 @@ def validate_repo(root: Path) -> list[str]:
     errors = _check_models(root)
     roles = {}
     for skill_md in sorted((root / "skills").glob("*/SKILL.md")):
-        errors += _check_skill(skill_md)
+        errors += _check_skill(root, skill_md)
         fm = parse_frontmatter(skill_md.read_text()) or {}
         meta = fm.get("metadata") or {}
         if meta.get("kind") == "role":
-            roles[skill_md.parent.name] = meta.get("tier")
-    if (root / "config" / "models.yaml").exists():
+            roles[skill_md.parent.name] = {"tier": meta.get("tier"),
+                                           "description": str(fm.get("description", "")).strip()}
+    if models_path(root).exists():
         errors += _check_agents(root, roles)
+    errors += _check_status_schema(root)
     return errors
 
 

@@ -37,7 +37,7 @@ def test_claude_settings_valid_json():
     data = json.loads(read("skills/team-init/references/claude-settings.json"))
     allow = data["permissions"]["allow"]
     assert "Bash(gh pr create:*)" in allow
-    assert "Bash(git push origin feature/*)" in allow
+    assert not any(a.startswith("Bash(git push") for a in allow)
     assert "{{TEST_COMMANDS}}" in allow
 
 
@@ -64,7 +64,7 @@ def test_ideation_modes_listed():
 def test_pm_role_frontmatter():
     from validate import parse_frontmatter
     fm = parse_frontmatter(read("skills/pm/SKILL.md"))
-    assert fm["metadata"]["tier"] == "deep" and fm["metadata"]["allowed-tiers"] == ["deep"]
+    assert fm["metadata"]["tier"] == "deep" and fm["metadata"]["allowed-tiers"] == ["deep", "standard"]
 
 
 TASK_LINE = re.compile(r"- \[ \] T\d+ \[(fast|standard)\] .+ — files: .+ — maps to: AC\d+")
@@ -164,7 +164,7 @@ def test_notice_credits_sources():
 
 def test_team_build_pushes_branch_before_first_stage():
     text = read("skills/team-build/SKILL.md")
-    assert "initial `status.md`" in text and "push fails" in text
+    assert "initial `status.md`" in text and "that push is the lease" in text
 
 
 def test_team_build_resume_reuses_branch_worktree():
@@ -188,12 +188,12 @@ def test_dispatch_points_at_skill_models_file():
 def test_docs_workflows_commit_only_their_paths():
     for wf in ("team-init", "team-ideate", "team-market"):
         text = read(f"skills/{wf}/SKILL.md")
-        assert "git commit -m" in text and " -- .agent-team" in text, wf
+        assert "agent-team docs-commit -m" in text and " .agent-team" in text, wf
         assert "default branch" in text and "stop" in text.lower(), wf
 
 
 def test_team_build_runs_build_before_review():
-    assert "Build` and `Test` commands" in read("skills/team-build/SKILL.md")
+    assert "agent-team test <slug> --build" in read("skills/team-build/SKILL.md")
 
 
 def test_allowlist_has_no_switch_and_has_resume_reads():
@@ -206,9 +206,120 @@ def test_allowlist_has_no_switch_and_has_resume_reads():
 def test_resume_from_stopped_defined():
     assert "stopped_at:" in read("skills/team-build/references/status-template.md")
     text = read("skills/team-build/SKILL.md")
-    assert "stage: stopped" in text and "stage: pr-open" in text
+    assert "`stopped`" in text and "`pr-open`" in text and "stopped_at" in text
 
 
 def test_no_hardcoded_main():
     for p in ("skills/reviewer/SKILL.md", "skills/team-build/SKILL.md"):
         assert "main..." not in read(p), p
+
+
+def test_review_loop_tracks_reviewed_commit_and_open_findings():
+    build = read("skills/team-build/SKILL.md")
+    assert "Set `last_reviewed_commit`" in build
+    reviewer = read("skills/reviewer/SKILL.md")
+    assert "previous findings" in reviewer.lower() and "never drop out silently" in reviewer
+    assert "## Previous findings" in read("skills/reviewer/references/review-template.md")
+
+
+def test_qa_fix_review_has_a_stop():
+    assert "review after QA fixes" in read("skills/team-build/SKILL.md")
+
+
+def test_team_build_phase1_safeguards():
+    text = read("skills/team-build/SKILL.md")
+    for k in ("agent-team tasks <slug>", "agent-team sync <slug>", "agent-team ci <slug> --watch",
+              "agent-team lease <slug> acquire", "agent-team push <slug>", "Never force-push",
+              "gh pr ready <pr> --undo", "set `pr=<number>`".replace("set ", "Set "), "standard-tier session"):
+        assert k in text, k
+
+
+def test_developer_works_only_on_given_tasks():
+    text = read("skills/developer/SKILL.md")
+    assert "Work only on the task ids in your prompt" in text
+
+
+def test_plan_template_feeds_tier_rules():
+    text = read("skills/tech-lead/references/plan-template.md")
+    assert "qa-ui: yes|no" in text and "## Security touchpoints" in text
+
+
+def test_allowlist_covers_helper_and_ci():
+    import json
+    allow = json.loads(read("skills/team-init/references/claude-settings.json"))["permissions"]["allow"]
+    for k in ("Bash(agent-team:*)", "Bash(gh pr checks:*)",
+              "Bash(gh pr ready:*)", "Bash(git symbolic-ref:*)", "Bash(gh repo view:*)"):
+        assert k in allow, k
+    # pushes go through `agent-team push` / `docs-commit`; no raw git push patterns (they can match --force or main)
+    assert not any(a == "Bash(*)" or a.startswith("Bash(git push") for a in allow)
+
+
+def test_gemini_dispatch_is_headless_safe():
+    text = read("skills/team-build/references/dispatch-gemini.md")
+    assert "--approval-mode auto_edit" in text and "--skip-trust" in text
+
+
+def test_protected_main_fallback():
+    for wf in ("team-init", "team-ideate", "team-wrap", "team-market"):
+        assert "agent-team/meta" in read(f"skills/{wf}/SKILL.md"), wf
+
+
+def test_no_hardcoded_owner_name():
+    for p in list((ROOT / "skills").rglob("*.md")) + list((ROOT / "agents").glob("*.md")):
+        assert not re.search(r"\bAdi\b", p.read_text()), p
+
+
+def test_lessons_loop_wired():
+    assert "lessons.md" in read("skills/team-wrap/SKILL.md")
+    for role in ("tech-lead", "developer", "reviewer", "pm"):
+        assert ".agent-team/lessons.md" in read(f"skills/{role}/SKILL.md"), role
+
+
+def test_ideas_have_status():
+    assert "**Status:** proposed" in read("skills/pm/references/ideas-template.md")
+    assert "reject" in read("skills/team-ideate/SKILL.md")
+
+
+def test_project_template_has_owner_and_excludes():
+    text = read("skills/team-init/references/project-template.md")
+    assert "## Owner" in text and "## Diff excludes" in text
+
+
+def test_owner_can_add_own_idea():
+    ideate = read("skills/team-ideate/SKILL.md")
+    assert 'team-ideate add "<idea>"' in ideate and "pm-intake" in ideate
+    pm = read("skills/pm/SKILL.md")
+    assert "**Intake**" in pm and "Intake mode" in pm and "Keep the owner's intent" in pm
+
+
+def test_team_init_upgrade_mode():
+    text = read("skills/team-init/SKILL.md")
+    assert "## Upgrade" in text and "agent-team upgrade" in text
+
+
+def test_docs_workflows_never_commit_on_default_branch():
+    for wf in ("team-init", "team-ideate", "team-wrap", "team-market"):
+        text = read(f"skills/{wf}/SKILL.md")
+        assert "agent-team docs-commit" in text and "git commit" not in text and "git push" not in text, wf
+
+
+def test_team_build_review_fixes_wired():
+    text = read("skills/team-build/SKILL.md")
+    for k in ("agent-team next <slug> review", "agent-team next <slug> qa", "agent-team idea <slug> --show",
+              "stop **without** the *Stop* steps", "CI fix broke the tests", "merge the agent-team/meta PR first"):
+        assert k in text, k
+
+
+def test_ci_fix_is_reviewed():
+    assert "review of the CI fix" in read("skills/team-build/SKILL.md")
+
+
+def test_team_init_guards_owner_edits():
+    assert "must not sweep in their edits" in read("skills/team-init/SKILL.md")
+
+
+def test_workflows_pull_with_agent_team_pull():
+    for wf in ("team-ideate", "team-wrap", "team-market"):
+        text = read(f"skills/{wf}/SKILL.md")
+        assert "`agent-team pull`" in text and "git pull --ff-only" not in text, wf
+    assert "`agent-team pull`" in read("skills/team-init/SKILL.md")

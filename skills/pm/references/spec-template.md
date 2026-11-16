@@ -19,4 +19,4 @@ slug: <slug> · effort: S|M|L · launch: false
 - AC2: …
 
 ## Success signal
-<How Adi will know after release that it worked: a metric, a behaviour, a support ticket that stops arriving.>
+<How the owner will know after release that it worked: a metric, a behaviour, a support ticket that stops arriving.>

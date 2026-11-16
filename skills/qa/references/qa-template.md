@@ -1,6 +1,6 @@
 # QA <N>: <slug>
 
-branch: `feature/<slug>` at `<commit>` · tier: <fast|standard> · build: <ok|failed> · suite: `<command>` → <result>
+branch: `feature/<slug>` at `<commit>` · tier: <fast|standard> · build + suite: `agent-team test <slug> --build` → <pass|fail>
 
 | AC | Method | Result (PASS/FAIL) | Evidence |
 |---|---|---|---|

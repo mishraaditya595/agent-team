@@ -27,8 +27,9 @@ def role_md(name, tier="fast", allowed="[fast, standard]", extra_fm="", body=ROL
 def make_repo(tmp_path):
     """Build a throwaway repo: make_repo({'dev': role_md('dev')}, models=...)"""
     def _make(skills=None, models=GOOD_MODELS):
-        (tmp_path / "config").mkdir(exist_ok=True)
-        (tmp_path / "config" / "models.yaml").write_text(models)
+        ref = tmp_path / "skills" / "team-build" / "references"
+        ref.mkdir(parents=True, exist_ok=True)
+        (ref / "models.yaml").write_text(models)
         for folder, text in (skills or {}).items():
             d = tmp_path / "skills" / folder
             d.mkdir(parents=True, exist_ok=True)

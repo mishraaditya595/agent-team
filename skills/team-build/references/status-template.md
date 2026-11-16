@@ -1,12 +1,17 @@
-<!-- .agent-team/features/<slug>/status.md — the workflow's memory; any machine resumes from it. -->
-stage: spec            # spec | plan | implement | review | qa | pr-open | merged | marketed | stopped
+<!-- .agent-team/features/<slug>/status.md — the workflow's memory; any machine resumes from it. Edit with `agent-team status <slug> --set key=value`. -->
+stage: spec            # spec | plan | implement | review | qa | pr | ci | pr-open | merged | marketed | stopped
 branch: feature/<slug>
+pr: none               # PR number once opened
+owner: none            # "<host> <utc time>" while a machine runs it (lease); none when idle
+worktree: .agent-team/worktrees/<slug>
 review_round: 0
 qa_round: 0
-worktree: <path>
-last_reviewed_commit: <sha or none>
+ci_round: 0
+last_reviewed_commit: none
+tests: none            # "<code commit> pass|fail(...)" — cached test result
 stop_reason: none
-stopped_at: none      # the stage that hit the limit; a rerun after Adi's fix resumes here
+stopped_at: none       # the stage that hit the limit; a rerun after the owner's fix resumes here
+retro: none            # done once lessons were captured (team-wrap)
 
 ## Log
-<!-- YYYY-MM-DD HH:MM <stage> <role> tier=<tier> model=<model> <note> -->
+<!-- YYYY-MM-DDTHH:MMZ <stage> <role> tier=<tier> model=<model> [tokens=<n>] [cost=<$>] <note> -->
