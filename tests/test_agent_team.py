@@ -298,3 +298,50 @@ def test_cleanup_removes_worktree_and_branch(repo):
     at.main(["cleanup", "tiny"])
     assert not wt.exists()
     assert "feature/tiny" not in sh("git", "branch", cwd=repo)
+
+
+V1_PROJECT = """# Demo — project context
+
+## Product
+A demo.
+
+## Build & test
+- Install: `npm ci`
+- Build: `npm run build`
+- Test: `npm test`
+
+## Channels
+X
+
+## Model overrides
+- developer: standard
+"""
+
+
+def test_upgrade_v1_repo(repo, capsys):
+    import json
+    (repo / ".agent-team" / "project.md").write_text(V1_PROJECT)
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(json.dumps(
+        {"model": "mine", "permissions": {"allow": ["Edit", "Bash(npm test:*)"], "deny": ["Bash(rm:*)"]}}))
+    assert at.main(["upgrade"]) == 0
+    text = (repo / ".agent-team" / "project.md").read_text()
+    heads = [h for h in text.splitlines() if h.startswith("## ")]
+    assert heads.index("## Owner") < heads.index("## Product")
+    assert heads.index("## Diff excludes") < heads.index("## Model overrides")
+    assert "- developer: standard" in text and "A demo." in text          # existing content kept
+    assert "## Positioning & voice\nunknown — owner to fill" in text and "## Conventions" in text
+    data = json.loads((repo / ".claude" / "settings.json").read_text())
+    allow = data["permissions"]["allow"]
+    assert data["model"] == "mine" and data["permissions"]["deny"] == ["Bash(rm:*)"]
+    assert "Bash(agent-team:*)" in allow and "Bash(npm run build:*)" in allow
+    assert allow.count("Bash(npm test:*)") == 1 and "{{TEST_COMMANDS}}" not in allow
+    assert (repo / ".codex" / "config.toml").exists()
+    capsys.readouterr()
+    assert at.main(["upgrade"]) == 0                                       # idempotent
+    assert "nothing — already up to date" in capsys.readouterr().out
+
+
+def test_intake_tier(repo, capsys):
+    r = tier(capsys, "pm-intake")
+    assert r["tier"] == "standard" and r["model"] == "sonnet"

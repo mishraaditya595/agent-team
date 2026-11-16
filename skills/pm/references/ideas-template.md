@@ -2,7 +2,7 @@
      Status: proposed | shipped | rejected — set with `agent-team idea <slug> --set <status>`.
      An idea is in progress while a feature/<slug> branch exists. -->
 
-## YYYY-MM-DD — mode: <expand|hold|reduce>
+## YYYY-MM-DD — mode: <expand|hold|reduce|owner>
 
 ### <slug> — <short title>
 - **Status:** proposed

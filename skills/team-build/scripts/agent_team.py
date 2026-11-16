@@ -7,6 +7,7 @@ Exit codes: 0 ok, 1 failure (message on stderr), 2 merge conflict (sync), 3 push
 """
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import socket
@@ -19,6 +20,8 @@ SKILL_DIR = HERE.parent                      # skills/team-build
 SKILLS = SKILL_DIR.parent                    # skills/
 MODELS = SKILL_DIR / "references" / "models.yaml"
 STATUS_TEMPLATE = SKILL_DIR / "references" / "status-template.md"
+INIT_REFS = SKILLS / "team-init" / "references"
+WORKTREES_IGNORE = ".agent-team/worktrees/"
 
 TIERS = ("deep", "standard", "fast")
 STAGES = ("spec", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
@@ -32,8 +35,8 @@ LOCKFILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "p
 GENERATED = ("*.g.dart", "*.freezed.dart", "*.mocks.dart", "*.gr.dart", "*.pb.go", "*_pb2.py", "*.min.js",
              "*.min.css", "*.map")
 TASK_LINE = re.compile(r"^\s*- \[( |x)\] (T\d+) \[(fast|standard)\]")
-ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm"}
-ROLES = ("pm-ideate", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing")
+ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm"}
+ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing")
 
 
 class Fail(Exception):
@@ -283,6 +286,8 @@ def rule_tier(role, slug, task=None, escalate=False):
     read = lambda name: (fd / name).read_text() if fd and (fd / name).exists() else ""
     if role == "pm-ideate":
         return "deep", "ideation"
+    if role == "pm-intake":
+        return "standard", "shaping the owner's idea"
     if role == "pm-spec":
         eff = idea_info(slug).get("effort")
         return ("standard", "idea effort S") if eff == "S" else ("deep", f"idea effort {eff or '?'}")
@@ -689,6 +694,96 @@ def cmd_cleanup(a):
         print(f"deleted origin/{branch}")
 
 
+# ---------- upgrade (repos set up by an older agent-team) ----------
+
+def _headings(text):
+    return [m.group(1).strip() for m in re.finditer(r"^##\s+(.+?)\s*$", text, re.M)]
+
+
+def owner_line(root):
+    name = git("config", "user.name", cwd=root, check=False)
+    r = run(["gh", "api", "user", "-q", ".login"], cwd=root, check=False)
+    login = r.stdout.strip() if r.returncode == 0 else ""
+    if name and login:
+        return f"{name} (@{login})"
+    return name or (f"@{login}" if login else "unknown — owner to fill")
+
+
+def add_missing_sections(text, template, owner="unknown — owner to fill"):
+    """Add template sections the project.md lacks, in template order, without touching existing ones."""
+    have = {h.lower() for h in _headings(text)}
+    order = _headings(template)
+    added = []
+    for i, h in enumerate(order):
+        if h.lower() in have:
+            continue
+        body = owner if h.lower() == "owner" else section_raw(template, h)
+        if body.startswith("<") and not body.startswith("<!--"):
+            body = "unknown — owner to fill"
+        block = f"## {h}\n{body}\n\n"
+        nxt = next((n for n in order[i + 1:] if n.lower() in have), None)
+        m = re.search(rf"^##\s+{re.escape(nxt)}\s*$", text, re.M | re.I) if nxt else None
+        if m:
+            text = text[:m.start()] + block + text[m.start():]
+        else:
+            text = text.rstrip("\n") + "\n\n" + block.rstrip("\n") + "\n"
+        have.add(h.lower())
+        added.append(h)
+    return text, added
+
+
+def section_raw(text, heading):
+    m = re.search(rf"^##\s+{re.escape(heading)}\s*$\n(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
+def merged_allow(existing, project_text):
+    """Template allow-list entries (with the project's commands filled in) missing from existing."""
+    tpl = json.loads((INIT_REFS / "claude-settings.json").read_text())["permissions"]["allow"]
+    cmds = [project_command(n, project_text) for n in ("Install", "Build", "Test")]
+    entries = []
+    for e in tpl:
+        entries += [f"Bash({c}:*)" for c in cmds if c] if e == "{{TEST_COMMANDS}}" else [e]
+    return [e for e in dict.fromkeys(entries) if e not in existing]
+
+
+def cmd_upgrade(a):
+    root = repo_root()
+    proj = root / ".agent-team" / "project.md"
+    if not proj.exists():
+        raise Fail(".agent-team/project.md not found — run team-init first")
+    changed = []
+    text, added = add_missing_sections(proj.read_text(), (INIT_REFS / "project-template.md").read_text(),
+                                       owner_line(root))
+    if added:
+        proj.write_text(text)
+        changed.append(".agent-team/project.md")
+        print(f"project.md: added sections {', '.join(added)}")
+    sp = root / ".claude" / "settings.json"
+    data = json.loads(sp.read_text()) if sp.exists() else {}
+    allow = data.setdefault("permissions", {}).setdefault("allow", [])
+    new = merged_allow(allow, text)
+    if new:
+        allow += new
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(json.dumps(data, indent=2) + "\n")
+        changed.append(".claude/settings.json")
+        print(f".claude/settings.json: added {len(new)} allow entries: {', '.join(new)}")
+    cx = root / ".codex" / "config.toml"
+    if not cx.exists():
+        cx.parent.mkdir(parents=True, exist_ok=True)
+        cx.write_text((INIT_REFS / "codex-project.toml").read_text())
+        changed.append(".codex/config.toml")
+        print(".codex/config.toml: created")
+    gi = root / ".gitignore"
+    lines = gi.read_text().splitlines() if gi.exists() else []
+    if WORKTREES_IGNORE not in lines:
+        gi.write_text("\n".join(lines + [WORKTREES_IGNORE]) + "\n")
+        changed.append(".gitignore")
+        print(f".gitignore: added {WORKTREES_IGNORE}")
+    print("changed: " + (" ".join(changed) if changed else "nothing — already up to date"))
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="agent-team", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -733,6 +828,8 @@ def build_parser():
     s.set_defaults(fn=cmd_pr_body)
     s = sub.add_parser("summary", help="all features: stage, rounds, tokens, cost")
     s.set_defaults(fn=cmd_summary)
+    s = sub.add_parser("upgrade", help="bring a repo set up by an older agent-team up to date (adds only)")
+    s.set_defaults(fn=cmd_upgrade)
     s = sub.add_parser("cleanup", help="remove a merged feature's worktree and branches")
     s.add_argument("slug"); s.add_argument("--remote", action="store_true"); s.set_defaults(fn=cmd_cleanup)
     return ap
