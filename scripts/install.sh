@@ -32,7 +32,7 @@ link_skills "$CLAUDE_SKILLS_DIR"
 link_skills "$AGENTS_SKILLS_DIR"
 
 if command -v python3 >/dev/null && python3 -c "import yaml" 2>/dev/null; then
-  run python3 "$REPO/scripts/codex_profiles.py" "$REPO/config/models.yaml" "$CODEX_CONFIG"
+  run python3 "$REPO/scripts/codex_profiles.py" "$REPO/skills/team-build/references/models.yaml" "$CODEX_CONFIG"
 else
   echo "skip: Codex profiles need python3 + pyyaml (pip install pyyaml)" >&2
 fi

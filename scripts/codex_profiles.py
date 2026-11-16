@@ -17,7 +17,8 @@ END = "# <<< agent-team profiles <<<"
 
 def render_profiles(models: dict) -> str:
     codex = models["codex"]
-    lines = [BEGIN, "# Managed by agent-team scripts/install.sh — edit config/models.yaml instead."]
+    lines = [BEGIN, "# Managed by agent-team scripts/install.sh — edit config/models.yaml instead.",
+             "# Keep your own top-level keys ABOVE this block (TOML puts keys below a table inside it)."]
     for tier in TIERS:
         lines += [f"[profiles.at-{tier}]", f'model = "{codex[tier]}"']
     lines.append(END)
@@ -34,9 +35,18 @@ def merge_into_config(existing: str, block: str) -> str:
 
 def main(argv: list[str]) -> int:
     models_path, config_path = Path(argv[1]), Path(argv[2])
+    models = load_models(models_path)
+    codex = models.get("codex")
+    if not codex:
+        print("models.yaml: no 'codex' tool — skipping Codex profiles")
+        return 0
+    missing = [t for t in TIERS if not codex.get(t)]
+    if missing:
+        print(f"models.yaml: codex missing tier '{missing[0]}' — skipping Codex profiles")
+        return 0
     config_path.parent.mkdir(parents=True, exist_ok=True)
     existing = config_path.read_text() if config_path.exists() else ""
-    config_path.write_text(merge_into_config(existing, render_profiles(load_models(models_path))))
+    config_path.write_text(merge_into_config(existing, render_profiles(models)))
     print(f"codex profiles written to {config_path}")
     return 0
 

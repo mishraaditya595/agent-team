@@ -14,7 +14,7 @@ You review the feature branch against two documents — what we meant to build (
 ## Reads
 
 - `.agent-team/features/<slug>/spec.md` and `plan.md`.
-- The diff: `git diff main...feature/<slug>`. In round 2+, only files changed since the last review: `git diff <last-reviewed-commit>..feature/<slug>`.
+- The diff: `git diff <default-branch>...feature/<slug>` (default branch: `git symbolic-ref --short refs/remotes/origin/HEAD`). In round 2+, only files changed since the last review: `git diff <last-reviewed-commit>..feature/<slug>`.
 - Other files only to check a specific concern (a caller, a type). Not the whole codebase.
 
 ## Writes

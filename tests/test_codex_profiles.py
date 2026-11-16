@@ -30,3 +30,20 @@ def test_merge_preserves_user_content():
     assert once == twice
     assert 'model = "user-choice"' in twice and "[profiles.mine]" in twice
     tomllib.loads(twice)  # still valid TOML
+
+
+def test_missing_tier_skips_cleanly(tmp_path, capsys):
+    from codex_profiles import main
+    m = tmp_path / "m.yaml"; c = tmp_path / "config.toml"
+    m.write_text("tools:\n  codex: {deep: a, standard: b}\n")
+    assert main(["x", str(m), str(c)]) == 0
+    assert not c.exists()
+    assert "codex missing tier 'fast'" in capsys.readouterr().out
+
+
+def test_missing_codex_tool_skips_cleanly(tmp_path, capsys):
+    from codex_profiles import main
+    m = tmp_path / "m.yaml"; c = tmp_path / "config.toml"
+    m.write_text("tools:\n  claude: {deep: a, standard: b, fast: c}\n")
+    assert main(["x", str(m), str(c)]) == 0 and not c.exists()
+    assert "no 'codex' tool" in capsys.readouterr().out

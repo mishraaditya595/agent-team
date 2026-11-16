@@ -77,3 +77,17 @@ def test_plugin_manifests_parse():
     plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
     market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
     assert plugin["name"] == "agent-team" == market["plugins"][0]["name"]
+
+
+def test_models_yaml_missing_tool(make_repo):
+    models = "tools:\n  claude: {deep: opus, standard: sonnet, fast: haiku}\n"
+    errs = validate_repo(make_repo({}, models=models))
+    assert "models.yaml: missing tool 'codex'" in errs and "models.yaml: missing tool 'gemini'" in errs
+
+
+def test_models_yaml_reachable_from_skill():
+    from conftest import ROOT
+    cfg = ROOT / "config" / "models.yaml"
+    ref = ROOT / "skills" / "team-build" / "references" / "models.yaml"
+    assert ref.is_file() and not ref.is_symlink()
+    assert cfg.resolve() == ref.resolve()

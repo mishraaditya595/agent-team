@@ -1,6 +1,6 @@
 # Dispatch in Gemini CLI
 
-Run each role as its own headless run from the worktree, with the model from `config/models.yaml` → `tools.gemini`:
+Run each role as its own headless run from the worktree, with the model from this skill's `references/models.yaml` → `tools.gemini`:
 
 ```bash
 gemini -m <model id> -p "Load and follow the <role> skill. Slug: <slug>. Mode/round: <…>. Inputs: <paths>."

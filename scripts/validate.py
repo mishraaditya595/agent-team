@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 TIERS = ("deep", "standard", "fast")
+TOOLS = ("claude", "codex", "gemini")
 TOP_LEVEL = {"name", "description", "license", "metadata"}
 KINDS = {"role", "workflow", "guideline"}
 ROLE_HEADINGS = ("## Reads", "## Writes", "## Never")
@@ -34,8 +35,9 @@ def _check_models(root: Path) -> list[str]:
         return ["models.yaml: missing config/models.yaml"]
     errors = []
     tools = load_models(path)
-    if not tools:
-        errors.append("models.yaml: no tools defined")
+    for tool in TOOLS:
+        if tool not in tools:
+            errors.append(f"models.yaml: missing tool '{tool}'")
     for tool, tiers in tools.items():
         for tier in TIERS:
             if not (tiers or {}).get(tier):

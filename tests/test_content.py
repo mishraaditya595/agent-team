@@ -160,3 +160,55 @@ def test_notice_credits_sources():
                  "multica-ai/andrej-karpathy-skills", "DietrichGebert/ponytail",
                  "coreyhaines31/marketingskills"):
         assert repo in text, repo
+
+
+def test_team_build_pushes_branch_before_first_stage():
+    text = read("skills/team-build/SKILL.md")
+    assert "initial `status.md`" in text and "push fails" in text
+
+
+def test_team_build_resume_reuses_branch_worktree():
+    text = read("skills/team-build/SKILL.md")
+    assert "git worktree add .agent-team/worktrees/<slug> feature/<slug>" in text
+    assert "local-only" in text
+
+
+def test_worktrees_live_inside_repo():
+    assert ".agent-team/worktrees/" in read("skills/team-build/SKILL.md")
+    assert ".agent-team/worktrees/" in read("skills/team-init/SKILL.md")
+    assert "-s workspace-write" in read("skills/team-build/references/dispatch-codex.md")
+
+
+def test_dispatch_points_at_skill_models_file():
+    for tool in ("claude", "codex", "gemini", "generic"):
+        assert "references/models.yaml" in read(f"skills/team-build/references/dispatch-{tool}.md"), tool
+    assert "references/models.yaml" in read("skills/team-build/SKILL.md")
+
+
+def test_docs_workflows_commit_only_their_paths():
+    for wf in ("team-init", "team-ideate", "team-market"):
+        text = read(f"skills/{wf}/SKILL.md")
+        assert "git commit -m" in text and " -- .agent-team" in text, wf
+        assert "default branch" in text and "stop" in text.lower(), wf
+
+
+def test_team_build_runs_build_before_review():
+    assert "Build` and `Test` commands" in read("skills/team-build/SKILL.md")
+
+
+def test_allowlist_has_no_switch_and_has_resume_reads():
+    import json
+    allow = json.loads(read("skills/team-init/references/claude-settings.json"))["permissions"]["allow"]
+    assert "Bash(git switch:*)" not in allow
+    assert "Bash(git show:*)" in allow and "Bash(git ls-remote:*)" in allow
+
+
+def test_resume_from_stopped_defined():
+    assert "stopped_at:" in read("skills/team-build/references/status-template.md")
+    text = read("skills/team-build/SKILL.md")
+    assert "stage: stopped" in text and "stage: pr-open" in text
+
+
+def test_no_hardcoded_main():
+    for p in ("skills/reviewer/SKILL.md", "skills/team-build/SKILL.md"):
+        assert "main..." not in read(p), p

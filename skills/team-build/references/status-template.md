@@ -6,6 +6,7 @@ qa_round: 0
 worktree: <path>
 last_reviewed_commit: <sha or none>
 stop_reason: none
+stopped_at: none      # the stage that hit the limit; a rerun after Adi's fix resumes here
 
 ## Log
 <!-- YYYY-MM-DD HH:MM <stage> <role> tier=<tier> model=<model> <note> -->

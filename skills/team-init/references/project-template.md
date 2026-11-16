@@ -30,7 +30,7 @@
 <Where marketing goes: e.g. Instagram, LinkedIn, X, Play Store listing, website, email list.>
 
 ## Model overrides
-<!-- Optional. Overrides config/models.yaml for this project, e.g.:
+<!-- Optional. Overrides the team-build skill's references/models.yaml for this project, e.g.:
 - developer: standard   # this codebase is tricky; skip the fast tier
 -->
 none

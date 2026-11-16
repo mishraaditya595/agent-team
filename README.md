@@ -39,7 +39,7 @@ Alternatives:
 
 ## Models and cost
 
-Roles name a **tier**; `config/models.yaml` maps tiers to each tool's models.
+Roles name a **tier**; `config/models.yaml` (a link to `skills/team-build/references/models.yaml`, so it ships with the skills however you install them) maps tiers to each tool's models. Check the Codex and Gemini model ids there against your accounts.
 
 | Role | Default | Moves up when |
 |---|---|---|
