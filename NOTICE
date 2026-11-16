@@ -1,0 +1,23 @@
+agent-team
+Copyright (c) 2026 Adi. MIT License (see LICENSE).
+
+The skills in this repo are original text, but their ideas and structure are adapted from
+these MIT-licensed projects. Thank you to their authors.
+
+- obra/superpowers — https://github.com/obra/superpowers
+  Brainstorm → plan → execute flow, fresh context per task, spec-compliance-then-quality review,
+  "evidence before claiming done", and the one-skills-folder / per-tool-manifest packaging.
+- garrytan/gstack — https://github.com/garrytan/gstack
+  CEO-style ideation scope modes (expand / hold / reduce), eng-manager plan checklist,
+  paranoid "bugs that pass CI" review lens, surfacing only taste decisions to the human.
+- bmad-code-org/BMAD-METHOD — https://github.com/bmad-code-org/BMAD-METHOD
+  Role personas handing off through files; lean developer context ("dev agents code, planning agents plan").
+- multica-ai/andrej-karpathy-skills (originally forrestchang/andrej-karpathy-skills) —
+  https://github.com/multica-ai/andrej-karpathy-skills
+  The four engineering rules: think before coding, simplicity first, surgical changes, goal-driven execution.
+- DietrichGebert/ponytail — https://github.com/DietrichGebert/ponytail
+  The YAGNI ladder and the over-engineering (simplicity) review pass.
+- coreyhaines31/marketingskills — https://github.com/coreyhaines31/marketingskills
+  One shared product-marketing context read first, then focused marketing pieces.
+
+Skill format: the Agent Skills open standard (https://agentskills.io).

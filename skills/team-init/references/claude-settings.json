@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git fetch:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(git worktree:*)",
+      "Bash(git push origin feature/*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr view:*)",
+      "{{TEST_COMMANDS}}"
+    ]
+  }
+}
