@@ -152,3 +152,11 @@ def test_team_market_requires_merged():
 
 def test_team_ideate_gate1():
     assert "team-build" in read("skills/team-ideate/SKILL.md")
+
+
+def test_notice_credits_sources():
+    text = read("NOTICE")
+    for repo in ("obra/superpowers", "garrytan/gstack", "bmad-code-org/BMAD-METHOD",
+                 "multica-ai/andrej-karpathy-skills", "DietrichGebert/ponytail",
+                 "coreyhaines31/marketingskills"):
+        assert repo in text, repo
