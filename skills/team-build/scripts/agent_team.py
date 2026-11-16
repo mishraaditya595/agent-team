@@ -1064,6 +1064,38 @@ def cmd_docs_pull(a):
     print("updated: " + (" ".join(updated) if updated else "nothing (checkout copies are current)"))
 
 
+def cmd_pull(a):
+    """`git pull --ff-only` for the default branch, safe with docs-pull's uncommitted copies: copies nobody
+    edited since docs-pull wrote them are put back first (git refuses to pull over them, even when
+    identical), then the newest docs are pulled in again. Copies that were edited are never discarded."""
+    root = repo_root()
+    d = default_branch(root)
+    if git("rev-parse", "--abbrev-ref", "HEAD", cwd=root, check=False) != d:
+        raise Fail(f"the checkout must be on the default branch ({d}) to pull")
+    edited = []
+    for rel in DOCS:
+        rec = _seed_record(root, rel)
+        if not rec.exists():
+            continue
+        if _is_seeded(root, rel):
+            if show("HEAD", rel, root) is not None:
+                git("checkout", "HEAD", "--", rel, cwd=root)
+            else:
+                (root / rel).unlink(missing_ok=True)
+            rec.unlink()
+        elif (root / rel).exists() and (root / rel).read_text() != (show("HEAD", rel, root) or ""):
+            edited.append(rel)
+        else:
+            rec.unlink()                       # back to HEAD already: the record is stale
+    r = run(["git", "pull", "-q", "--ff-only"], cwd=root, check=False)
+    if r.returncode:
+        hint = (f" These docs were edited after docs-pull wrote them and aren't committed: {', '.join(edited)} — "
+                f"commit them with `agent-team docs-commit`, or discard them, then rerun.") if edited else ""
+        raise Fail(f"git pull --ff-only failed: {_last_line(r)}.{hint}")
+    updated = [rel for rel in DOCS if seed_doc(rel)]
+    print(f"pulled {d}" + (f"; docs from {META}: {' '.join(updated)}" if updated else ""))
+
+
 def cmd_docs_commit(a):
     """Commit agent-team docs edited in the checkout without committing on the local default branch:
     a temp worktree gets the edits, pushes to the default branch, or to agent-team/meta (+ PR) if it's
@@ -1263,6 +1295,9 @@ def build_parser():
     s.set_defaults(fn=cmd_pr_body)
     s = sub.add_parser("summary", help="all features: stage, rounds, tokens, cost")
     s.set_defaults(fn=cmd_summary)
+    s = sub.add_parser("pull", help="pull the default branch (instead of `git pull`): puts back unedited "
+                                  "docs-pull copies first, then docs-pull again")
+    s.set_defaults(fn=cmd_pull)
     s = sub.add_parser("docs-pull", help="refresh the checkout's agent-team docs from agent-team/meta while "
                                        "its PR is open (run before a role edits them)")
     s.set_defaults(fn=cmd_docs_pull)

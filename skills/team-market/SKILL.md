@@ -7,7 +7,7 @@ metadata:
 
 # team-market `<slug>`
 
-1. **On the default branch.** `D=$(agent-team default-branch)`. If the checkout isn't on `$D`, stop and tell the owner. `git pull --ff-only` (if it can't fast-forward, stop), then `agent-team docs-pull`.
+1. **On the default branch.** `D=$(agent-team default-branch)`. If the checkout isn't on `$D`, stop and tell the owner. `agent-team pull` (instead of `git pull`: it first puts back any doc copy `docs-pull` wrote that nobody edited, then pulls `--ff-only` and brings in docs still waiting on an `agent-team/meta` PR). If it fails, stop and show the owner its message.
 2. **Merged only.** Read `pr:` from `.agent-team/features/<slug>/status.md` and check `gh pr view <pr> --json state,mergedAt,url` (no status file on `$D` means it isn't merged). If it isn't merged, stop: "merge the PR first". Marketing never describes unshipped work.
 3. If the status's `stage` isn't `merged` yet, run the `team-wrap` skill for `<slug>` first.
 4. Pick the tier: `agent-team tier marketing <slug> --tool <tool>` (`deep` for `launch: true` in the spec, else `standard`; respects `project.md` `## Model overrides`).

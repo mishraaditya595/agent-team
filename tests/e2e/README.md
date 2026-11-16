@@ -18,7 +18,7 @@ Use a throwaway clone of a small product (a tiny Flutter or Node app with at lea
 | 10 | Push a conflicting change to main mid-run | stops at review/pr with "merge conflict", draft PR |
 | 11 | Repo with a CI workflow that fails on the branch | one CI fix round, then draft PR "CI failing" |
 | 12 | `team-status` | table with stages, rounds, tokens where reported |
-| 13 | Protected `main` (branch protection on) → `team-ideate` | ideas pushed to `agent-team/meta` with a PR; local `main` has no extra commit; `team-build` still finds the slug; after squash-merging the PR, `git pull --ff-only` works |
+| 13 | Protected `main` (branch protection on) → `team-ideate` | ideas pushed to `agent-team/meta` with a PR; local `main` has no extra commit; `team-build` still finds the slug; then `team-ideate` again **before** merging, then squash-merge the PR: `agent-team pull` fast-forwards and the next workflow runs |
 | 14 | `team-ideate add "<a one-line idea>"`, then `team-build <new slug>` | one `mode: owner` entry with slug, value/effort, ≤ 2 open questions; PM ran on standard; build starts from it |
 | 15 | In a repo set up with v0.1, run `team-init upgrade` | only missing `project.md` sections and allow entries added; existing text untouched; second run says "already up to date" |
 

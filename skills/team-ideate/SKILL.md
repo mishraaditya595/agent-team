@@ -7,7 +7,7 @@ metadata:
 
 # team-ideate `[expand|hold|reduce]` · `team-ideate add "<idea>"` · `team-ideate reject <slug>`
 
-1. Needs `.agent-team/project.md` (else: "run team-init first"). The checkout must be on the default branch (`D=$(agent-team default-branch)`); if not, stop and tell the owner. `git pull --ff-only` (if it can't fast-forward, stop), then `agent-team docs-pull` (brings in ideas still waiting on an `agent-team/meta` PR).
+1. Needs `.agent-team/project.md` (else: "run team-init first"). The checkout must be on the default branch (`D=$(agent-team default-branch)`); if not, stop and tell the owner. `agent-team pull` (instead of `git pull`: it first puts back any doc copy `docs-pull` wrote that nobody edited, then pulls `--ff-only` and brings in docs still waiting on an `agent-team/meta` PR). If it fails, stop and show the owner its message.
 2. Pick the action:
    - **Reject** (`reject <slug>`): `agent-team idea <slug> --set rejected`, then commit and push (step 3), and stop. The PM never re-proposes rejected ideas.
    - **Add the owner's idea** (`add "<idea>"`, or the owner describes an idea and wants it built): dispatch the `pm` role in **intake mode** on the tier from `agent-team tier pm-intake --tool <tool>`, passing the owner's words verbatim (and any file or link they gave). It appends one entry, or reports that the idea already exists.

@@ -20,14 +20,14 @@ Run once per product repo. Afterwards every role can work on this project. The p
    - Gemini CLI: nothing to write; see the team-build skill's `references/dispatch-gemini.md` for its approval settings.
    Anything not on the list still prompts — that's intended.
 5. **Commit and push only these paths.** If the checkout isn't on `$D`, stop and tell the owner. `agent-team docs-commit -m "chore: init agent-team" --title "agent-team: setup" .agent-team .gitignore .claude/settings.json .codex/config.toml`. `agent-team docs-commit` commits from a temporary worktree — never on your local default branch — and pushes to `$D`, or, if `$D` is protected or an `agent-team/meta` PR is still open, to `agent-team/meta`, opening or reusing its PR. Anything else the owner has staged or changed stays untouched.
-6. If it went to `agent-team/meta`, tell the owner to merge that PR and `git pull` before running `team-build` (feature branches start from `$D`, and the permission settings apply only once they're in the checkout). `team-ideate` works before the merge, but may ask for permissions.
+6. If it went to `agent-team/meta`, tell the owner to merge that PR and run `agent-team pull` (or `git pull`) before running `team-build` (feature branches start from `$D`, and the permission settings apply only once they're in the checkout). `team-ideate` works before the merge, but may ask for permissions.
 7. **Tell the owner** to read `project.md` once and fix anything wrong — especially `## Positioning & voice` and `## Channels`. Next step: run `team-ideate`.
 
 ## Upgrade (repos set up by an older version)
 
 Adds only what's missing; never rewrites what the owner wrote.
 
-1. Same checks as step 1, and the checkout must be on `$D` (else stop and tell the owner). `git pull --ff-only`, then `agent-team docs-pull`.
+1. Same checks as step 1, and the checkout must be on `$D` (else stop and tell the owner). `agent-team pull` (instead of `git pull`: it first puts back any doc copy `docs-pull` wrote that nobody edited, then pulls `--ff-only` and brings in docs still waiting on an `agent-team/meta` PR). If it fails, stop and show the owner its message.
 2. `agent-team upgrade`. It adds missing `project.md` sections (filling `## Owner` from git/gh), merges the current permission allow-list (with this project's install/build/test commands) into `.claude/settings.json`, creates `.codex/config.toml` if missing, and adds `.agent-team/worktrees/` to `.gitignore`. It prints what changed.
 3. If it printed `nothing — already up to date`, say so and stop.
 4. Fill any new section you can from cheap reads (as in step 3 above); leave voice, positioning and channels as `unknown — owner to fill`.

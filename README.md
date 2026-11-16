@@ -43,7 +43,7 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 
 **Set up with an earlier version?** Merge the update, re-run `install.sh`, then run `team-init upgrade` in each product repo — it adds the new `project.md` sections and permissions without touching what you wrote.
 
-If `main` is branch-protected, `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own, so `git pull` keeps fast-forwarding after a squash merge. Merge the setup PR before the first `team-build`.
+If `main` is branch-protected, `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own. While a meta PR is open, the workflows also put its newer docs into your checkout as uncommitted copies; to update `main` in that repo, use **`agent-team pull`** rather than `git pull` — it puts back copies nobody edited, so the fast-forward works after a squash merge (manual fix if needed: `git checkout -- .agent-team`). Merge the setup PR before the first `team-build`.
 
 ## The helper CLI
 
@@ -62,7 +62,7 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links and the tier/cost log |
 | `idea <slug> [--set …\|--show]` / `summary` | idea lifecycle and lookup; all-feature summary |
 | `cleanup <slug> [--remote]` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work, and `--remote` deletes the remote branch only if it was merged (`--force` to override) |
-| `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected |
+| `pull` / `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected; `pull` replaces `git pull` in the workflows |
 | `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
 
 ## Models and cost

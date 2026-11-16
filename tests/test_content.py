@@ -316,3 +316,10 @@ def test_ci_fix_is_reviewed():
 
 def test_team_init_guards_owner_edits():
     assert "must not sweep in their edits" in read("skills/team-init/SKILL.md")
+
+
+def test_workflows_pull_with_agent_team_pull():
+    for wf in ("team-ideate", "team-wrap", "team-market"):
+        text = read(f"skills/{wf}/SKILL.md")
+        assert "`agent-team pull`" in text and "git pull --ff-only" not in text, wf
+    assert "`agent-team pull`" in read("skills/team-init/SKILL.md")
