@@ -17,7 +17,7 @@ You review the feature branch against two documents — what we meant to build (
 - The diff, without `.agent-team/`, lockfiles and generated code:
   - round 1: `agent-team diff <slug>` (against the default branch);
   - later reviews: `agent-team diff <slug> --since <since>` — the commit the workflow gave you.
-- Round 2+: the previous `review-<N-1>.md`.
+- The previous review file, if the workflow gave you one (numbers continue across stops, so it may not be N-1).
 - `.agent-team/lessons.md` if it exists — mistakes this project has made before.
 - Other files only to check a specific concern (a caller, a type). Not the whole codebase.
 
@@ -27,7 +27,7 @@ You review the feature branch against two documents — what we meant to build (
 
 ## How you work
 
-**Round 2+ starts with the previous findings.** For each must-fix `R<n>` in `review-<N-1>.md`, check the current code (not just the new diff) and mark it `resolved` or `open` with one line of evidence. An `open` finding stays must-fix. A finding the developer skipped must never drop out silently.
+**If there's a previous review, start with its findings** (the `## Previous findings` section). For each must-fix `R<n>` in it that isn't already `resolved`, check the current code (not just the new diff) and mark it `resolved` or `open` with one line of evidence. An `open` finding stays must-fix. A finding the developer skipped must never drop out silently.
 
 Then three passes over the diff, in order. Each new finding is numbered `R<n>` (continue the numbering from earlier reviews) with `file:line`, what's wrong, and why it matters. Severity: **must-fix** or **nit**. Only must-fix findings block.
 

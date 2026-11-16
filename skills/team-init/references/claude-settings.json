@@ -16,8 +16,6 @@
       "Bash(git symbolic-ref:*)",
       "Bash(git worktree:*)",
       "Bash(git merge-base:*)",
-      "Bash(git push origin feature/*)",
-      "Bash(git push -u origin feature/*)",
       "Bash(gh repo view:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr view:*)",

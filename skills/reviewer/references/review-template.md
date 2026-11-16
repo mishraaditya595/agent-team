@@ -3,7 +3,7 @@
 branch: `feature/<slug>` · reviewed up to: `<commit>` · since: `<commit or default branch>` · tier: <standard|deep> · tests: `agent-team test` → <pass|fail>
 
 ## Previous findings
-<!-- Round 2+ only; round 1: "(first review)". One line per must-fix from review-<N-1>.md. -->
+<!-- "(first review)" if there's no previous review. Otherwise one line per must-fix still open in the previous review file. -->
 - R1 — resolved — <evidence: file:line or test name>
 - R3 — open — <what's still wrong>
 

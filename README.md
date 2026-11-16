@@ -43,7 +43,7 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 
 **Set up with an earlier version?** Merge the update, re-run `install.sh`, then run `team-init upgrade` in each product repo — it adds the new `project.md` sections and permissions without touching what you wrote.
 
-If `main` is branch-protected, `team-init`, `team-ideate` and `team-wrap` push their docs to an `agent-team/meta` branch and open a PR for it instead.
+If `main` is branch-protected, `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own, so `git pull` keeps fast-forwarding after a squash merge. Merge the setup PR before the first `team-build`.
 
 ## The helper CLI
 
@@ -56,10 +56,13 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `diff <slug> [--since SHA]` | the review diff without `.agent-team/`, lockfiles and generated code (`*.g.dart`, `*.freezed.dart`, …) |
 | `test <slug> [--build]` | runs the project's tests in the worktree; caches the result per code commit |
 | `sync <slug>` | merges the default branch in; reports conflicts |
-| `push <slug>` / `lease <slug>` | push with a clear message on rejection; one machine per feature |
+| `push <slug>` / `lease <slug>` | push with a clear message on rejection (never forced); a lease that's committed and pushed, so only one machine runs a feature |
+| `next <slug> review\|qa` | the next review/QA file number — continues across stops, so earlier reports are never overwritten |
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |
 | `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links and the tier/cost log |
-| `idea <slug> [--set …]` / `summary` / `cleanup` | idea lifecycle, all-feature summary, post-merge cleanup |
+| `idea <slug> [--set …\|--show]` / `summary` | idea lifecycle and lookup; all-feature summary |
+| `cleanup <slug>` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work (`--force` to override) |
+| `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected |
 | `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
 
 ## Models and cost

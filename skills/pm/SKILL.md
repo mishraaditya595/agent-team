@@ -18,7 +18,7 @@ You work in one of three modes. The workflow tells you which.
 - `.agent-team/project.md` — always, first.
 - **Ideation mode:** the product as it is today. Skim cheaply: README, the main screens/routes/endpoints, recent `git log --oneline -30`, existing `.agent-team/ideas.md` (never re-propose a slug or idea already there, whatever its status — `rejected` ideas stay rejected), `.agent-team/lessons.md` if present, and any feedback notes the owner points you to. Don't read implementation details you don't need.
 - **Intake mode:** the owner's idea as given, `ideas.md` (to avoid duplicates and slug clashes), and only the parts of the product the idea touches — enough to rate it.
-- **Spec mode:** the chosen entry in `ideas.md`, plus only the parts of the product that the idea touches.
+- **Spec mode:** the chosen idea's entry (the workflow passes it; `agent-team idea <slug> --show` prints it), plus only the parts of the product that the idea touches.
 
 ## Writes
 

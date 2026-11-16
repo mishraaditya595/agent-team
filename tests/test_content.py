@@ -37,7 +37,7 @@ def test_claude_settings_valid_json():
     data = json.loads(read("skills/team-init/references/claude-settings.json"))
     allow = data["permissions"]["allow"]
     assert "Bash(gh pr create:*)" in allow
-    assert "Bash(git push origin feature/*)" in allow
+    assert not any(a.startswith("Bash(git push") for a in allow)
     assert "{{TEST_COMMANDS}}" in allow
 
 
@@ -164,7 +164,7 @@ def test_notice_credits_sources():
 
 def test_team_build_pushes_branch_before_first_stage():
     text = read("skills/team-build/SKILL.md")
-    assert "initial `status.md`" in text and "push fails" in text
+    assert "initial `status.md`" in text and "that push is the lease" in text
 
 
 def test_team_build_resume_reuses_branch_worktree():
@@ -188,7 +188,7 @@ def test_dispatch_points_at_skill_models_file():
 def test_docs_workflows_commit_only_their_paths():
     for wf in ("team-init", "team-ideate", "team-market"):
         text = read(f"skills/{wf}/SKILL.md")
-        assert "git commit -m" in text and " -- .agent-team" in text, wf
+        assert "agent-team docs-commit -m" in text and " .agent-team" in text, wf
         assert "default branch" in text and "stop" in text.lower(), wf
 
 
@@ -229,7 +229,7 @@ def test_qa_fix_review_has_a_stop():
 def test_team_build_phase1_safeguards():
     text = read("skills/team-build/SKILL.md")
     for k in ("agent-team tasks <slug>", "agent-team sync <slug>", "agent-team ci <slug> --watch",
-              "agent-team lease <slug> acquire", "agent-team push <slug>", "never force-push",
+              "agent-team lease <slug> acquire", "agent-team push <slug>", "Never force-push",
               "gh pr ready <pr> --undo", "set `pr=<number>`".replace("set ", "Set "), "standard-tier session"):
         assert k in text, k
 
@@ -247,10 +247,11 @@ def test_plan_template_feeds_tier_rules():
 def test_allowlist_covers_helper_and_ci():
     import json
     allow = json.loads(read("skills/team-init/references/claude-settings.json"))["permissions"]["allow"]
-    for k in ("Bash(agent-team:*)", "Bash(git push -u origin feature/*)", "Bash(gh pr checks:*)",
+    for k in ("Bash(agent-team:*)", "Bash(gh pr checks:*)",
               "Bash(gh pr ready:*)", "Bash(git symbolic-ref:*)", "Bash(gh repo view:*)"):
         assert k in allow, k
-    assert not any(a in allow for a in ("Bash(*)", "Bash(git push:*)", "Bash(git push origin main)"))
+    # pushes go through `agent-team push` / `docs-commit`; no raw git push patterns (they can match --force or main)
+    assert not any(a == "Bash(*)" or a.startswith("Bash(git push") for a in allow)
 
 
 def test_gemini_dispatch_is_headless_safe():
@@ -294,3 +295,16 @@ def test_owner_can_add_own_idea():
 def test_team_init_upgrade_mode():
     text = read("skills/team-init/SKILL.md")
     assert "## Upgrade" in text and "agent-team upgrade" in text
+
+
+def test_docs_workflows_never_commit_on_default_branch():
+    for wf in ("team-init", "team-ideate", "team-wrap", "team-market"):
+        text = read(f"skills/{wf}/SKILL.md")
+        assert "agent-team docs-commit" in text and "git commit" not in text and "git push" not in text, wf
+
+
+def test_team_build_review_fixes_wired():
+    text = read("skills/team-build/SKILL.md")
+    for k in ("agent-team next <slug> review", "agent-team next <slug> qa", "agent-team idea <slug> --show",
+              "stop **without** the *Stop* steps", "CI fix broke the tests", "merge the agent-team/meta PR first"):
+        assert k in text, k

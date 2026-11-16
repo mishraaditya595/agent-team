@@ -15,15 +15,15 @@ Run the orchestrator in a **standard-tier session** (Sonnet, or Codex `--profile
 
 ## 0. Start or resume
 
-- Needs a git repo with `.agent-team/project.md` (else: "run team-init first"). `D=$(agent-team default-branch)`.
-- `git fetch origin`. Then:
+- Needs a git repo with `.agent-team/project.md` on the default branch: `D=$(agent-team default-branch)`, then `git fetch origin` and `git show origin/$D:.agent-team/project.md`. Missing → stop: "run team-init first" (or, if it's only on `agent-team/meta`, "merge the agent-team/meta PR first" — the feature branch starts from `$D`).
+- Then:
   - **Remote `feature/<slug>` exists → resume.** If this machine has no `.agent-team/worktrees/<slug>`, run `git worktree add .agent-team/worktrees/<slug> feature/<slug>` (tracking `origin/feature/<slug>`). If the branch has no `status.md`, stop: "status.md is missing" — don't start over.
   - **Only a local-only `feature/<slug>` exists** (never pushed) → resume it here; `agent-team push <slug>` first, and stop if that fails.
   - **Neither exists → new run.** `agent-team idea <slug>`: unknown slug → stop; status `shipped` or `rejected` → stop and say so.
-- **Lease (resume only; a new run takes it in step 1):** `agent-team lease <slug> acquire` — it also fast-forwards the worktree to `origin/feature/<slug>`. If it fails, another machine is running this feature or the branches diverged: stop and relay the message. Use `--takeover` only when the owner says that run is dead.
+- **Lease (resume only; a new run takes it in step 1):** `agent-team lease <slug> acquire`. It fast-forwards the worktree to `origin/feature/<slug>`, then commits and pushes the lease, so another machine sees it. If it fails (another machine holds it, won the race, or the branches diverged), stop and relay the message — **don't touch `status.md` or the PR**: they belong to the other run. Use `--takeover` only when the owner says that run is dead.
 - Resume by `stage` (`agent-team status <slug> stage`):
   - `stopped` — read `stop_reason`; continue from `stopped_at` (the owner fixed the cause on the branch). Reset that stage's counter (`review_round`, `qa_round` or `ci_round`) to 0.
-  - `pr-open` — the PR is waiting for the owner's merge: release the lease and say so; nothing else.
+  - `pr-open` — the PR is waiting for the owner's merge: `agent-team lease <slug> release` and say so; nothing else.
   - `merged` / `marketed` — nothing to build; point to `team-wrap <slug>` / `team-market <slug>`.
   - any other stage — continue from it.
 
@@ -31,7 +31,7 @@ Run the orchestrator in a **standard-tier session** (Sonnet, or Codex `--profile
 
 Worktrees live inside the project at `.agent-team/worktrees/<slug>` (gitignored by team-init), so tool permissions and sandboxes cover them. Never touch the current checkout, even if it has uncommitted changes.
 
-New run: `git worktree add -b feature/<slug> .agent-team/worktrees/<slug> origin/$D`, then `agent-team init-status <slug>` (writes the initial `status.md` with `stage: spec` and takes the lease), commit it, and `agent-team push <slug>` right away. If the push fails, stop — another machine must be able to see this run.
+New run: `git worktree add -b feature/<slug> .agent-team/worktrees/<slug> origin/$D`, then `agent-team init-status <slug>` (writes the initial `status.md` with `stage: spec` and this machine as owner), commit it, and `agent-team push <slug>` right away — that push is the lease. If it's rejected, another machine started the same feature: remove this worktree and branch (`agent-team cleanup <slug> --force` — nothing of value is in it yet) and stop.
 
 ## 2. Tiers
 
@@ -47,21 +47,21 @@ New run: `git worktree add -b feature/<slug> .agent-team/worktrees/<slug> origin
 
 ## 3. Run the stages
 
-After every stage: commit the artifacts, `agent-team push <slug>` (exit 3 → *Stop* with "push rejected"; never force-push), set the next `stage`, and `agent-team log <slug> <stage> <role> --tier <t> --model <m> [--tokens <n>] [--cost <usd>] <note>`. Add tokens and cost whenever the tool reports them (see the dispatch notes).
+After every stage, in this order: set the next `stage` and `agent-team log <slug> <stage> <role> --tier <t> --model <m> [--tokens <n>] [--cost <usd>] <note>` (add tokens and cost whenever the tool reports them — see the dispatch notes); commit the artifacts and `status.md` together; `agent-team push <slug>`. Exit 3 means another machine pushed to this branch: stop **without** the *Stop* steps (no status edit, no PR change, no lease release) and tell the owner. Never force-push.
 
-1. **spec** — dispatch `pm` in spec mode → `spec.md`.
+1. **spec** — dispatch `pm` in spec mode, giving it the idea's entry from `agent-team idea <slug> --show` → `spec.md`.
 2. **plan** — dispatch `tech-lead` → `plan.md`. If it wrote `## Spec problems`, go to *Stop*.
 3. **implement** — `agent-team tasks <slug>` prints the unticked tasks in batches, e.g. `fast T2,T3` / `standard T4`. Dispatch `developer` once per batch, in order, at that batch's tier, naming exactly those task ids. If it reports `T<n> failed twice`, re-dispatch only `T<n>` at `agent-team tier developer <slug> --escalate`; if it fails again (or was already standard), go to *Stop* ("T<n> failed at standard") — the remaining tasks stay unticked for the resume. When `tasks` prints `all tasks done`, run `agent-team test <slug> --build`; if it fails, go to *Stop* ("broken build before review").
-4. **review** — First `agent-team sync <slug>` (exit 2 → *Stop*: "merge conflict with $D"); if it merged anything, `agent-team test <slug>` (fail → *Stop*: "tests fail after merging $D"). Then for round N = `review_round` + 1:
-   - Set `review_round=N`. Dispatch `reviewer` with: round N, `since` = `last_reviewed_commit` (none in round 1), and in round 2+ the previous `review-<N-1>.md`. → `review-N.md`.
+4. **review** — First `agent-team sync <slug>` (exit 2 → *Stop*: "merge conflict with $D"; exit 1 → *Stop* with its message); if it merged anything, `agent-team test <slug>` (fail → *Stop*: "tests fail after merging $D"). Then each round:
+   - `review_round` +1. `agent-team next <slug> review` gives the file number N and the previous review file — numbers continue across stops, so earlier reviews are never overwritten. Dispatch `reviewer` with: review N, `since` = `last_reviewed_commit` (`none` only if no review exists yet), and the previous review file (if any). → `review-N.md`.
    - Set `last_reviewed_commit` to the worktree's `git rev-parse --short HEAD` (the commit just reviewed).
-   - `APPROVED` → qa. `CHANGES REQUESTED` → dispatch `developer` (standard) with the must-fix `R<n>` findings → next round. Still `CHANGES REQUESTED` after round **3** → *Stop* ("3 review rounds").
-5. **qa** — For round M = `qa_round` + 1: set `qa_round=M`, dispatch `qa` → `qa-M.md`. `PASSED` → pr. `FAILED` → developer (standard) fixes the `Q<n>` bugs → reviewer checks the changes since `last_reviewed_commit` (next `review-N.md` number; not counted in `review_round`), then set `last_reviewed_commit`. If that review says `CHANGES REQUESTED`: developer fixes, one more such review; still `CHANGES REQUESTED` → *Stop* ("review after QA fixes"). Then QA again. `FAILED` after round **2** → *Stop* ("2 QA rounds").
+   - `APPROVED` → qa. `CHANGES REQUESTED` → dispatch `developer` (standard) with the must-fix `R<n>` findings → next round. Still `CHANGES REQUESTED` when `review_round` reaches **3** → *Stop* ("3 review rounds").
+5. **qa** — Each round: `qa_round` +1; `agent-team next <slug> qa` gives the file number M; dispatch `qa` → `qa-M.md`. `PASSED` → pr. `FAILED` → developer (standard) fixes the `Q<n>` bugs → reviewer checks the changes since `last_reviewed_commit` (file number from `agent-team next <slug> review`; not counted in `review_round`), then set `last_reviewed_commit`. If that review says `CHANGES REQUESTED`: developer fixes, one more such review; still `CHANGES REQUESTED` → *Stop* ("review after QA fixes"). Then QA again. `FAILED` when `qa_round` reaches **2** → *Stop* ("2 QA rounds").
 6. **pr** — `agent-team sync <slug>` again (conflict → *Stop*; merged anything → `agent-team test <slug>`, fail → *Stop*), push. If `gh pr view feature/<slug> --json number` finds a PR, reuse it; else `gh pr create --base $D --head feature/<slug> --title "<spec title>" --body "$(agent-team pr-body <slug> --summary '<3 lines>')"`. Set `pr=<number>`.
-7. **ci** — `agent-team ci <slug> --watch`. `pass` or `none` → pr-open. `fail` → set `ci_round` +1; if it's 1, dispatch `developer` (standard) with the failing checks (`gh run view <run-id> --log-failed`, last ~60 lines), push, watch again. A second `fail` → *Stop* ("CI failing").
-8. **pr-open** — `agent-team lease <slug> release`, commit and push `status.md`, and tell the owner: "PR #<n> is green and ready to merge; afterwards run `team-wrap <slug>` (and `team-market <slug>` for outreach)."
+7. **ci** — `agent-team ci <slug> --watch`. `pass` or `none` → pr-open. It waits up to 5 minutes for checks to appear before deciding there's no CI. `fail` → set `ci_round` +1; if it's 1, dispatch `developer` (standard) with the failing checks (`gh run view <run-id> --log-failed`, last ~60 lines), then `agent-team test <slug>` (fail → *Stop*: "CI fix broke the tests"), commit, push, watch again. A second `fail` → *Stop* ("CI failing").
+8. **pr-open** — commit and push `status.md`, then `agent-team lease <slug> release` (it commits and pushes the release), and tell the owner: "PR #<n> is green and ready to merge; afterwards run `team-wrap <slug>` (and `team-market <slug>` for outreach)."
 
-**Stop** (a limit hit, spec problems, broken build, merge conflict, rejected push, failing CI): `agent-team status <slug> --set stage=stopped stopped_at=<stage> "stop_reason=<reason>"`, `agent-team lease <slug> release`, commit and push (skip the push if the push itself failed). No PR yet → `gh pr create --draft … --body "$(agent-team pr-body <slug> --stopped '<reason>')"` and set `pr`. PR already open → `gh pr ready <pr> --undo` and `gh pr edit <pr> --body "$(agent-team pr-body <slug> --stopped '<reason>')"`. Tell the owner in one line what needs their decision. After they fix it on the branch, `team-build <slug>` resumes from `stopped_at`.
+**Stop** (a limit hit, spec problems, broken build, merge conflict, failing CI — *not* a rejected push or a lost lease, see above): `agent-team status <slug> --set stage=stopped stopped_at=<stage> "stop_reason=<reason>"`, commit, `agent-team push <slug>` (exit 3 → stop here, change nothing else), then `agent-team lease <slug> release`. No PR yet → `gh pr create --draft … --body "$(agent-team pr-body <slug> --stopped '<reason>')"` and set `pr`. PR already open → `gh pr ready <pr> --undo` and `gh pr edit <pr> --body "$(agent-team pr-body <slug> --stopped '<reason>')"`. Tell the owner in one line what needs their decision. After they fix it on the branch, `team-build <slug>` resumes from `stopped_at`.
 
 ## Keep it cheap
 
