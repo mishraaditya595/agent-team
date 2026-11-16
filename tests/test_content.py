@@ -132,3 +132,23 @@ def test_dispatch_refs_exist():
               "generic": "intended="}
     for tool, needle in expect.items():
         assert needle in read(f"skills/team-build/references/dispatch-{tool}.md"), tool
+
+
+def test_marketing_template_headings():
+    text = read("skills/marketing/references/marketing-template.md")
+    for h in ("## Release notes", "## Announcement", "## Social posts", "## Landing page changes"):
+        assert h in text, h
+
+
+def test_marketing_never_posts():
+    never = section(read("skills/marketing/SKILL.md"), "## Never").lower()
+    assert "post" in never or "publish" in never
+
+
+def test_team_market_requires_merged():
+    text = read("skills/team-market/SKILL.md")
+    assert "merged" in text and "gh pr view" in text
+
+
+def test_team_ideate_gate1():
+    assert "team-build" in read("skills/team-ideate/SKILL.md")
