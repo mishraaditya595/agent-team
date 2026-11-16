@@ -7,21 +7,24 @@ metadata:
 
 # team-init
 
-Run once per product repo. Afterwards every role can work on this project.
+Run once per product repo. Afterwards every role can work on this project. The person running it is the **owner** unless they say otherwise.
 
 ## Steps
 
-1. **Check the repo.** It must be a git repo with a `main` (or default) branch and a GitHub remote (`gh repo view` works). If not, stop and say what's missing.
-2. **Create `.agent-team/`** with an empty `features/` folder, and add `.agent-team/worktrees/` to the repo's `.gitignore` (team-build keeps its worktrees there, inside the project, so tool permissions and sandboxes cover them). If `.agent-team/project.md` already exists, stop and ask Adi whether to redo it.
-3. **Draft `project.md`** from `references/project-template.md`. Fill it by reading only what's cheap and telling: README, package manifests (`pubspec.yaml`, `package.json`, `pyproject.toml`, …), CI config, test config, top-level folder names. Don't read the whole codebase. Keep it ≤ 60 lines. Write `unknown — Adi to fill` rather than guessing positioning, voice or channels.
+1. **Check the repo.** It must be a git repo with a GitHub remote (`gh repo view` works). `D=$(agent-team default-branch)` (if `agent-team` isn't on PATH, use `python3 <team-build skill folder>/scripts/agent_team.py`; suggest running `install.sh`). If anything is missing, stop and say what.
+2. **Create `.agent-team/`** with an empty `features/` folder, and add `.agent-team/worktrees/` to the repo's `.gitignore` (team-build keeps its worktrees there, inside the project, so tool permissions and sandboxes cover them). If `.agent-team/project.md` already exists, stop and ask the owner whether to redo it.
+3. **Draft `project.md`** from `references/project-template.md`. Fill it by reading only what's cheap and telling: README, package manifests (`pubspec.yaml`, `package.json`, `pyproject.toml`, …), CI config, test config, top-level folder names. Don't read the whole codebase. Keep it ≤ 60 lines. `## Owner`: the owner's name and `gh api user -q .login`. Write `unknown — owner to fill` rather than guessing positioning, voice or channels. If the project uses code generation the template's defaults don't cover, list its output globs under `## Diff excludes`.
 4. **Write the permission settings** so the build workflow doesn't stop for prompts:
    - Claude Code: merge `references/claude-settings.json` into `.claude/settings.json`. Keep every existing key; add only missing allow entries. Replace `{{TEST_COMMANDS}}` with one `Bash(<cmd>:*)` entry per install/build/test command from `## Build & test`.
    - Codex: merge `references/codex-project.toml` into the project's `.codex/config.toml` (create it if needed; keep existing keys).
+   - Gemini CLI: nothing to write; see the team-build skill's `references/dispatch-gemini.md` for its approval settings.
    Anything not on the list still prompts — that's intended.
-5. **Commit on the default branch, only these paths.** If the checkout isn't on the default branch, stop and tell Adi. Commit without sweeping in anything Adi has staged: `git commit -m "chore: init agent-team" -- .agent-team .gitignore .claude/settings.json .codex/config.toml` (after `git add` of exactly those paths).
-6. **Tell Adi** to read `project.md` once and fix anything wrong — especially `## Positioning & voice` and `## Channels`. Next step: run `team-ideate`.
+5. **Commit on the default branch, only these paths.** If the checkout isn't on `$D`, stop and tell the owner. Commit without sweeping in anything the owner has staged: `git add` exactly these paths, then `git commit -m "chore: init agent-team" -- .agent-team .gitignore .claude/settings.json .codex/config.toml`.
+6. **Push.** `git push origin $D`. If it's rejected because `$D` is protected: `git push origin HEAD:refs/heads/agent-team/meta`, open (or reuse) a PR from `agent-team/meta` into `$D` titled "agent-team: setup", and tell the owner to merge it. Other workflows read `.agent-team/` from `agent-team/meta` until then.
+7. **Tell the owner** to read `project.md` once and fix anything wrong — especially `## Positioning & voice` and `## Channels`. Next step: run `team-ideate`.
 
 ## Never
 
 - Never overwrite an existing `.claude/settings.json` or `.codex/config.toml`; merge into them.
-- Never add broad permissions (`Bash(*)`, full-auto/danger modes).
+- Never add broad permissions (`Bash(*)`, full-auto/danger modes, `--approval-mode yolo`).
+- Never force-push or bypass branch protection.

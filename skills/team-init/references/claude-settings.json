@@ -3,6 +3,7 @@
     "allow": [
       "Edit",
       "Write",
+      "Bash(agent-team:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -11,10 +12,19 @@
       "Bash(git fetch:*)",
       "Bash(git show:*)",
       "Bash(git ls-remote:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git symbolic-ref:*)",
       "Bash(git worktree:*)",
+      "Bash(git merge-base:*)",
       "Bash(git push origin feature/*)",
+      "Bash(git push -u origin feature/*)",
+      "Bash(gh repo view:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr view:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr ready:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
       "{{TEST_COMMANDS}}"
     ]
   }

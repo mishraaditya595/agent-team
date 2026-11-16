@@ -2,6 +2,9 @@
 
 <!-- Every agent-team role reads this first. Keep it to ~one screen (≤ 60 lines). Facts, not essays. -->
 
+## Owner
+<Name (and GitHub handle) of the person who picks features and merges PRs. Roles address them as "the owner".>
+
 ## Product
 <What it is and what it does, 2–3 lines.>
 
@@ -17,7 +20,7 @@
 ## Build & test
 - Install: `<command>`
 - Build: `<command>`
-- Test: `<command>`   <!-- "none yet" if there are no tests -->
+- Test: `<command>`   <!-- `none yet` if there are no tests; `agent-team test` runs Build and Test from here -->
 - Run locally: `<command>`
 
 ## Conventions
@@ -28,6 +31,12 @@
 
 ## Channels
 <Where marketing goes: e.g. Instagram, LinkedIn, X, Play Store listing, website, email list.>
+
+## Diff excludes
+<!-- Optional. Extra glob patterns left out of review diffs (lockfiles, .agent-team/ and common generated code are already excluded), e.g.:
+- `lib/l10n/generated/**`
+-->
+none
 
 ## Model overrides
 <!-- Optional. Overrides the team-build skill's references/models.yaml for this project, e.g.:
