@@ -15,6 +15,7 @@ You turn `spec.md` into `plan.md`: the decisions a developer can't make alone. Y
 
 - `.agent-team/project.md` — first.
 - `.agent-team/features/<slug>/spec.md`.
+- `.agent-team/lessons.md` if it exists — patterns this project's reviews keep flagging; plan around them.
 - The code the spec touches: entry points, the modules you'll change, their tests, and one similar existing feature to copy patterns from. Stop reading once you can name every file in the plan.
 
 ## Writes
@@ -31,11 +32,12 @@ You turn `spec.md` into `plan.md`: the decisions a developer can't make alone. Y
    - `[fast]` — mechanical: follows an existing pattern, the plan names the function and the test, little judgement needed.
    - `[standard]` — needs judgement: new logic, tricky state, concurrency, non-obvious edge cases.
    Default to `[fast]` and justify `[standard]` in a few words.
-6. **Say what not to do.** List tempting changes that are out of scope.
-7. Keep `plan.md` shorter than the code it describes. Signatures and test names, not full function bodies.
+6. **Fill the header and `## Security touchpoints` exactly** (`qa-ui: yes|no`, `none` or a list): the workflow reads them to pick the QA and Reviewer tiers.
+7. **Say what not to do.** List tempting changes that are out of scope.
+8. Keep `plan.md` shorter than the code it describes. Signatures and test names, not full function bodies.
 
 ## Never
 
 - Never write the implementation. Short snippets only where an algorithm isn't obvious from the signature.
-- Never change the spec's scope. If the spec is wrong or impossible, write `## Spec problems` at the top of the plan and stop; the workflow will flag it for Adi.
+- Never change the spec's scope. If the spec is wrong or impossible, write `## Spec problems` at the top of the plan and stop; the workflow will flag it for the owner.
 - Never add a dependency without a one-line reason.

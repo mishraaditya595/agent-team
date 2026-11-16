@@ -7,8 +7,10 @@ Adapted from gstack's eng-manager plan review (garrytan/gstack, MIT). Every item
 - Data flow covers where the data is read, written and shown.
 - Failure modes: network down, empty data, bad input, permission denied — each has a behaviour or is out of scope.
 - Data migrations: none, or a migration task with a rollback note.
-- Security touchpoints (auth, payments, personal data, secrets): listed, or "none". Any listed → the review will run on the `deep` tier.
+- `## Security touchpoints` (auth, payments, personal data, secrets, migrations): listed, or exactly `none`. Any listed → the review runs on the `deep` tier.
+- `qa-ui:` in the header is `yes` only if some AC can only be checked through the UI.
 - YAGNI ladder applied; any new dependency has a reason.
-- The test command is exact and runnable from the repo root.
+- The test command is exact, runnable from the repo root, and matches `project.md` `## Build & test`.
+- Nothing in the plan repeats a mistake listed in `.agent-team/lessons.md`.
 - Tasks tagged `[fast]` really are mechanical; `[standard]` ones say why.
 - The plan is shorter than the code it describes.
