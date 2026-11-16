@@ -2,7 +2,7 @@
   "name": "agent-team",
   "version": "0.2.0",
   "description": "A portable AI product team: PM, Tech Lead, Developer, Reviewer, QA and Marketing, with cost-aware model tiers.",
-  "author": { "name": "Adi" },
+  "author": { "name": "Aditya Mishra", "url": "https://github.com/mishraaditya595" },
   "license": "MIT",
   "keywords": ["agents", "skills", "product", "code-review", "qa", "marketing"]
 }

@@ -33,6 +33,14 @@ The two 👤 steps are the only ones that need you. The one exception: if grilli
 
 **1. Install once per machine**
 
+In Claude Code:
+
+```
+/plugin install agent-team --marketplace mishraaditya595/agent-team
+```
+
+For Codex, Gemini CLI or other tools:
+
 ```bash
 git clone https://github.com/mishraaditya595/agent-team ~/agent-team
 pip install pyyaml   # needed for Codex profiles
