@@ -1,6 +1,7 @@
 {
   "name": "agent-team",
-  "owner": { "name": "Adi" },
+  "description": "A portable AI product team for your repo.",
+  "owner": { "name": "Aditya Mishra", "url": "https://github.com/mishraaditya595" },
   "plugins": [
     {
       "name": "agent-team",
