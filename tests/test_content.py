@@ -282,3 +282,15 @@ def test_ideas_have_status():
 def test_project_template_has_owner_and_excludes():
     text = read("skills/team-init/references/project-template.md")
     assert "## Owner" in text and "## Diff excludes" in text
+
+
+def test_owner_can_add_own_idea():
+    ideate = read("skills/team-ideate/SKILL.md")
+    assert 'team-ideate add "<idea>"' in ideate and "pm-intake" in ideate
+    pm = read("skills/pm/SKILL.md")
+    assert "**Intake**" in pm and "Intake mode" in pm and "Keep the owner's intent" in pm
+
+
+def test_team_init_upgrade_mode():
+    text = read("skills/team-init/SKILL.md")
+    assert "## Upgrade" in text and "agent-team upgrade" in text

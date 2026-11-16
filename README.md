@@ -6,6 +6,7 @@ You approve twice: **which feature to build**, and **the merge**. Everything in 
 
 ```
 team-ideate ─► PM proposes ideas ─► you pick one (Gate 1)   [team-ideate reject <slug> to drop one]
+team-ideate add "<your idea>" ─► PM shapes it into an idea entry (Gate 1 when you build it)
 team-build <slug>
    PM spec ─► Tech Lead plan ─► Developer (TDD, per task batch)
            ─► sync with main ─► Reviewer (3 passes, ≤3 rounds, re-checks open findings)
@@ -35,10 +36,12 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 ## First run in a product repo
 
 1. `team-init` — creates `.agent-team/`, drafts `project.md` from the codebase (owner, build/test commands, voice, channels), and writes permission settings so builds don't stop for prompts. Read `project.md` once and fix it.
-2. `team-ideate [expand|hold|reduce]` — up to 5 ideas in `.agent-team/ideas.md`.
+2. `team-ideate [expand|hold|reduce]` — up to 5 ideas in `.agent-team/ideas.md`. **Got your own idea?** `team-ideate add "field reps lose drafts when offline — keep them on the device"` — the PM turns it into an entry with a slug, value/effort and open questions. Then `team-build <slug>` (or say "add … and build it" to do both).
 3. `team-build <slug>` — runs in its own git worktree on `feature/<slug>`; your checkout is never touched. Resumable on any machine from `.agent-team/features/<slug>/status.md`; a lease stops two machines running the same feature at once. Start it in a standard-tier session (e.g. Sonnet) — the roles pick their own models.
 4. Review and merge the PR.
 5. `team-wrap <slug>`, then optionally `team-market <slug>`.
+
+**Set up with an earlier version?** Merge the update, re-run `install.sh`, then run `team-init upgrade` in each product repo — it adds the new `project.md` sections and permissions without touching what you wrote.
 
 If `main` is branch-protected, `team-init`, `team-ideate` and `team-wrap` push their docs to an `agent-team/meta` branch and open a PR for it instead.
 
@@ -57,6 +60,7 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |
 | `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links and the tier/cost log |
 | `idea <slug> [--set …]` / `summary` / `cleanup` | idea lifecycle, all-feature summary, post-merge cleanup |
+| `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
 
 ## Models and cost
 
@@ -64,7 +68,7 @@ Roles name a **tier**; `skills/team-build/references/models.yaml` maps tiers to 
 
 | Role | Default | Moves |
 |---|---|---|
-| PM | deep (Opus) | spec on standard when the idea's effort is S |
+| PM | deep (Opus) | standard when shaping your own idea (`add`), and for the spec when the idea's effort is S |
 | Tech Lead | deep | standard for tiny specs (≤ 2 ACs, effort S) |
 | Developer | each task's tag (fast/standard) | a task that fails twice → standard; fixes for findings run at standard |
 | Reviewer | standard | diff > 400 lines or > 15 files (noise excluded), or security touchpoints in the plan → deep |
