@@ -45,3 +45,23 @@ def test_codex_project_toml_parses():
     import tomllib
     data = tomllib.loads(read("skills/team-init/references/codex-project.toml"))
     assert data["sandbox_mode"] == "workspace-write"
+
+
+def test_spec_template_has_numbered_ac():
+    text = read("skills/pm/references/spec-template.md")
+    for h in ("## Problem", "## Users affected", "## Proposal", "## Out of scope",
+              "## Acceptance criteria", "## Success signal"):
+        assert h in text, h
+    assert re.search(r"^\s*-?\s*AC1\b", text, re.M)
+
+
+def test_ideation_modes_listed():
+    text = read("skills/pm/references/ideation-modes.md")
+    for m in ("expand", "hold", "reduce"):
+        assert re.search(rf"^#+ .*`?{m}`?", text, re.M), m
+
+
+def test_pm_role_frontmatter():
+    from validate import parse_frontmatter
+    fm = parse_frontmatter(read("skills/pm/SKILL.md"))
+    assert fm["metadata"]["tier"] == "deep" and fm["metadata"]["allowed-tiers"] == ["deep"]
