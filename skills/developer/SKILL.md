@@ -39,7 +39,7 @@ For each unticked task, in order:
 
 If the project has no tests yet, set up the framework the plan's `## Test plan` names before the first task.
 
-**When a task fails:** if the same task still fails its tests after your second attempt, stop working on it and report `T<n> failed twice` with the last error. The workflow will re-run that task on a stronger model. Don't loop.
+**When a task fails twice:** if the same task fails its tests on your second attempt, stop working on it and report `T<n> failed twice` with the last error. The workflow will re-run that task on a stronger model. Don't loop.
 
 **When fixing findings:** fix each `R<n>`/`Q<n>` with a test that reproduces it first, then the fix. Touch nothing else.
 
