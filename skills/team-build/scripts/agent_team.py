@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -22,19 +23,23 @@ MODELS = SKILL_DIR / "references" / "models.yaml"
 STATUS_TEMPLATE = SKILL_DIR / "references" / "status-template.md"
 INIT_REFS = SKILLS / "team-init" / "references"
 WORKTREES_IGNORE = ".agent-team/worktrees/"
+META = "agent-team/meta"            # docs branch used when the default branch is protected
+PROTECTED = re.compile(r"protected branch|GH006|GH013|repository rule|required status|review is required", re.I)
+POLL_SECONDS = 15
 
 TIERS = ("deep", "standard", "fast")
 STAGES = ("spec", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
 STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "review_round", "qa_round", "ci_round",
                "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro")
 IDEA_STATUSES = ("proposed", "shipped", "rejected")   # in progress = a feature/<slug> branch exists
-LEASE_TTL_HOURS = 2
+LEASE_TTL_HOURS = 6   # a lease older than this (no log/commit since) counts as abandoned
 BIG_DIFF_LINES, BIG_DIFF_FILES = 400, 15
 LOCKFILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "pubspec.lock", "Podfile.lock",
              "poetry.lock", "uv.lock", "Pipfile.lock", "Cargo.lock", "Gemfile.lock", "composer.lock", "go.sum")
 GENERATED = ("*.g.dart", "*.freezed.dart", "*.mocks.dart", "*.gr.dart", "*.pb.go", "*_pb2.py", "*.min.js",
              "*.min.css", "*.map")
-TASK_LINE = re.compile(r"^\s*- \[( |x)\] (T\d+) \[(fast|standard)\]")
+CHECKBOX = re.compile(r"^\s*- \[( |x|X)\]")
+TASK_LINE = re.compile(r"^\s*- \[( |x|X)\] (T\d+)\b(?:\s+\[([^\]]*)\])?", re.I)
 ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm"}
 ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing")
 
@@ -160,11 +165,58 @@ def default_branch(root=None):
     raise Fail("can't find the default branch; run `git remote set-head origin --auto`")
 
 
+def show(ref, rel, cwd=None):
+    r = run(["git", "show", f"{ref}:{rel}"], cwd=cwd or repo_root(), check=False)
+    return r.stdout if r.returncode == 0 else None
+
+
+def read_doc(rel):
+    """An agent-team doc (project.md, ideas.md, lessons.md): an unmerged agent-team/meta copy wins
+    (protected default branch), else the local checkout, else origin/<default>."""
+    root = repo_root()
+    try:
+        main_v = show(f"origin/{default_branch(root)}", rel, root)
+    except Fail:
+        main_v = None
+    meta_v = show(f"origin/{META}", rel, root)
+    if meta_v is not None and meta_v != main_v:
+        return meta_v
+    local = root / rel
+    if local.exists():
+        return local.read_text()
+    return main_v if main_v is not None else meta_v
+
+
+DOCS = (".agent-team/project.md", ".agent-team/ideas.md", ".agent-team/lessons.md")
+
+
+def _seed_record(root, rel):
+    return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root)) / "agent-team-seed" / rel
+
+
+def seed_doc(rel):
+    """Make the checkout's copy the newest one (read_doc), remembering what it was seeded from, so a
+    later docs-commit merges against that and not against HEAD."""
+    root = repo_root()
+    text = read_doc(rel)
+    local = root / rel
+    if text is None or (local.exists() and local.read_text() == text):
+        return False
+    if local.exists() and local.read_text() != (show("HEAD", rel, root) or ""):
+        raise Fail(f"{rel} has uncommitted edits; commit them with `agent-team docs-commit` first")
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(text)
+    rec = _seed_record(root, rel)
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(text)
+    return True
+
+
 def project_md():
-    p = repo_root() / ".agent-team" / "project.md"
-    if not p.exists():
+    text = read_doc(".agent-team/project.md")
+    if text is None:
         raise Fail(".agent-team/project.md not found — run team-init first")
-    return p.read_text()
+    return text
 
 
 def project_command(name, text=None):
@@ -279,6 +331,23 @@ def security_touchpoints(plan):
     return bool(body) and not re.fullmatch(r"[-*\s]*none\.?", body)
 
 
+def plan_tasks(plan):
+    """[(done, id, tier)] for every checkbox line in plan.md's ## Tasks. Fails on a missing or unknown tag."""
+    body = section(plan, "Tasks")
+    if not body:
+        raise Fail("plan.md has no '## Tasks' section")
+    out = []
+    for line in body.splitlines():
+        if not CHECKBOX.match(line):
+            continue
+        m = TASK_LINE.match(line)
+        tag = (m.group(3) or "").strip().lower() if m else ""
+        if not m or tag not in ("fast", "standard"):
+            raise Fail(f"plan.md task needs an id and a [fast] or [standard] tag: {line.strip()}")
+        out.append((m.group(1).lower() == "x", m.group(2).upper(), tag))
+    return out
+
+
 def rule_tier(role, slug, task=None, escalate=False):
     """The tier rules from the team-build skill. Returns (tier, reason)."""
     base = work_dir(slug) if slug else repo_root()
@@ -301,10 +370,9 @@ def rule_tier(role, slug, task=None, escalate=False):
             return "standard", "escalated after 2 failures"
         if not task:
             raise Fail("developer needs --task T<n>")
-        for line in read("plan.md").splitlines():
-            m = TASK_LINE.match(line)
-            if m and m.group(2) == task:
-                return m.group(3), f"task tag {task}"
+        for _, tid, tag in plan_tasks(read("plan.md")):
+            if tid == task.upper():
+                return tag, f"task tag {tid}"
         raise Fail(f"task {task} not found in plan.md")
     if role == "reviewer":
         lines, files = diffstat(slug)
@@ -338,23 +406,14 @@ def pick(role, slug, tool, task=None, escalate=False):
 # ---------- ideas ----------
 
 def idea_block(text, slug):
-    m = re.search(rf"^###\s+{re.escape(slug)}\b.*?(?=^###?\s|\Z)", text, re.M | re.S)
+    m = re.search(rf"^###[ \t]+{re.escape(slug)}(?=[ \t]|$).*?(?=^###?\s|\Z)", text, re.M | re.S)
     return m.group(0) if m else None
 
 
 def idea_sources():
-    root = repo_root()
-    local = root / ".agent-team" / "ideas.md"
-    if local.exists():
-        yield local.read_text()
-    try:
-        d = default_branch(root)
-    except Fail:
-        d = None
-    for ref in ([f"origin/{d}"] if d else []) + ["origin/agent-team/meta"]:
-        r = run(["git", "show", f"{ref}:.agent-team/ideas.md"], cwd=root, check=False)
-        if r.returncode == 0:
-            yield r.stdout
+    text = read_doc(".agent-team/ideas.md")
+    if text is not None:
+        yield text
 
 
 def idea_info(slug):
@@ -386,7 +445,9 @@ def set_idea_status(path, slug, status):
 
 def exclude_specs(project_text=""):
     pats = [f"**/{p}" for p in LOCKFILES + GENERATED]
-    pats += re.findall(r"^\s*-\s*`?([^`\s]+)`?", section(project_text, "Diff excludes"), re.M)
+    for p in re.findall(r"^\s*-\s*`?([^`\s]+)`?", section(project_text, "Diff excludes"), re.M):
+        p = p.lstrip("/") if p.startswith("/") else (p if "/" in p else f"**/{p}")
+        pats.append(p)
     return [":(exclude).agent-team"] + [f":(exclude,glob){p}" for p in pats if p.lower() != "none"]
 
 
@@ -434,6 +495,9 @@ def cmd_init_status(a):
 def cmd_status(a):
     p = status_path(a.slug)
     if a.set:
+        bad = [kv for kv in a.set if "=" not in kv]
+        if bad:
+            raise Fail(f"--set takes KEY=VALUE pairs; got: {' '.join(bad)}")
         updates = dict(kv.split("=", 1) for kv in a.set)
         write_status(p, updates)
         return
@@ -460,22 +524,42 @@ def cmd_log(a):
         write_status(p, {"owner": f"{me()} {now_utc().isoformat(timespec='minutes')}"})
 
 
+def _status_rel(slug):
+    return f".agent-team/features/{slug}/status.md"
+
+
+def _commit_status(wt, slug, msg):
+    """Commit only status.md; returns True if there was something to commit."""
+    rel = _status_rel(slug)
+    git("add", "--", rel, cwd=wt)
+    if run(["git", "diff", "--cached", "--quiet", "--", rel], cwd=wt, check=False).returncode == 0:
+        return False
+    git("commit", "-q", "-m", msg, "--", rel, cwd=wt)
+    return True
+
+
+def _catch_up(wt, branch):
+    """Fast-forward the worktree to origin/<branch> if it exists; fail if they diverged."""
+    if not git("ls-remote", "--heads", "origin", branch, cwd=wt, check=False):
+        return False
+    git("fetch", "-q", "origin", branch, cwd=wt)
+    if run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=wt, check=False).returncode:
+        raise Fail(f"local {branch} has diverged from origin/{branch}; resolve by hand before resuming")
+    return True
+
+
 def cmd_lease(a):
+    """The lease lives in status.md on the pushed branch: taking it is a commit + push, so a second machine
+    either sees it after fetching, or (if both raced) gets its push rejected and backs out."""
     wt = worktree(a.slug)
     branch = f"feature/{a.slug}"
-    if a.action == "acquire" and wt.exists():
-        if git("ls-remote", "--heads", "origin", branch, cwd=wt, check=False):
-            git("fetch", "-q", "origin", branch, cwd=wt)
-            r = run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=wt, check=False)
-            if r.returncode:
-                raise Fail(f"local {branch} has diverged from origin; resolve by hand before resuming")
-    p = status_path(a.slug)
-    if a.action == "release":
-        write_status(p, {"owner": "none"})
-        return
+    if not wt.exists():
+        raise Fail(f"no worktree at {wt}")
+    _catch_up(wt, branch)
+    p = feature_dir(wt, a.slug) / "status.md"
     owner = read_status(p).get("owner", "none")
     host, _, when = owner.partition(" ")
-    if owner and owner != "none" and host != me() and not a.takeover:
+    if a.action == "acquire" and owner not in ("", "none") and host != me() and not a.takeover:
         try:
             fresh = now_utc() - dt.datetime.fromisoformat(when) < dt.timedelta(hours=LEASE_TTL_HOURS)
         except ValueError:
@@ -483,36 +567,60 @@ def cmd_lease(a):
         if fresh:
             raise Fail(f"{a.slug} is running on {host} (last update {when}). "
                        f"Wait, or rerun with --takeover if that run is dead.")
-    write_status(p, {"owner": f"{me()} {now_utc().isoformat(timespec='minutes')}"})
-    print(f"lease: {me()}")
+    if a.action == "release" and owner not in ("", "none") and host != me() and not a.takeover:
+        raise Fail(f"the lease belongs to {host}, not {me()}; not releasing it")
+    new = "none" if a.action == "release" else f"{me()} {now_utc().isoformat(timespec='minutes')}"
+    write_status(p, {"owner": new})
+    committed = _commit_status(wt, a.slug, f"chore({a.slug}): lease {a.action} by {me()}")
+    r = run(["git", "push", "-u", "origin", branch], cwd=wt, check=False)
+    if r.returncode:
+        if committed:
+            run(["git", "reset", "-q", "--keep", "HEAD~1"], cwd=wt, check=False)
+        try:
+            _catch_up(wt, branch)
+        except Fail:
+            pass
+        other = read_status(p).get("owner", "unknown")
+        raise Fail(f"lease {a.action} not recorded: another machine pushed first (owner now: {other}). "
+                   f"Don't touch the PR or status; tell the owner.", code=3)
+    print(f"lease: {'released' if a.action == 'release' else me()}")
 
 
 def cmd_tier(a):
     tool = a.tool or os.environ.get("AGENT_TEAM_TOOL", "claude")
+    if not a.slug and a.role not in ("pm-ideate", "pm-intake"):
+        raise Fail(f"tier {a.role} needs the feature slug: agent-team tier {a.role} <slug>")
     r = pick(a.role, a.slug, tool, a.task, a.escalate)
     print(f"tier={r['tier']} model={r['model']} effort={r['effort']} reason={r['reason']}")
 
 
 def cmd_tasks(a):
     plan = feature_dir(work_dir(a.slug), a.slug) / "plan.md"
+    if not plan.exists():
+        raise Fail(f"{plan} is missing")
     batches = []
-    for line in plan.read_text().splitlines():
-        m = TASK_LINE.match(line)
-        if not m:
-            continue
-        if m.group(1) == "x":
+    for done, tid, tag in plan_tasks(plan.read_text()):
+        if done:
             if batches and batches[-1][0] != "done":
                 batches.append(("done", []))
             continue
-        if batches and batches[-1][0] == m.group(3):
-            batches[-1][1].append(m.group(2))
+        if batches and batches[-1][0] == tag:
+            batches[-1][1].append(tid)
         else:
-            batches.append((m.group(3), [m.group(2)]))
+            batches.append((tag, [tid]))
     todo = [(t, ids) for t, ids in batches if t != "done"]
     if not todo:
         print("all tasks done")
     for tier, ids in todo:
         print(f"{tier} {','.join(ids)}")
+
+
+def cmd_next(a):
+    fd = feature_dir(work_dir(a.slug), a.slug)
+    nums = sorted(int(m.group(1)) for p in fd.glob(f"{a.kind}-*.md")
+                  if (m := re.fullmatch(rf"{a.kind}-(\d+)\.md", p.name)))
+    n = (nums[-1] if nums else 0) + 1
+    print(f"n={n} file={a.kind}-{n}.md prev={f'{a.kind}-{nums[-1]}.md' if nums else 'none'}")
 
 
 def cmd_diff(a):
@@ -560,6 +668,10 @@ def cmd_test(a):
 def cmd_sync(a):
     wt = worktree(a.slug)
     d = default_branch()
+    dirty = git("status", "--porcelain", "--", ".", f":(exclude).agent-team/features/{a.slug}", cwd=wt)
+    if dirty:
+        raise Fail("uncommitted changes in the worktree (not a merge conflict); commit or discard them first:\n"
+                   + dirty)
     git("fetch", "-q", "origin", d, cwd=wt)
     if run(["git", "merge-base", "--is-ancestor", f"origin/{d}", "HEAD"], cwd=wt, check=False).returncode == 0:
         print(f"up to date with origin/{d}")
@@ -568,7 +680,9 @@ def cmd_sync(a):
     if r.returncode:
         files = git("diff", "--name-only", "--diff-filter=U", cwd=wt, check=False)
         run(["git", "merge", "--abort"], cwd=wt, check=False)
-        raise Fail(f"merge conflict with origin/{d} in: {', '.join(files.split()) or '?'}", code=2)
+        if not files:
+            raise Fail(f"merging origin/{d} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
+        raise Fail(f"merge conflict with origin/{d} in: {', '.join(files.split())}", code=2)
     print(f"merged origin/{d}")
     return 0
 
@@ -590,23 +704,45 @@ def cmd_push(a):
 def cmd_idea(a):
     if a.set:
         p = repo_root() / ".agent-team" / "ideas.md"
+        if read_doc(".agent-team/ideas.md") is None:
+            raise Fail("no .agent-team/ideas.md")
+        if not p.exists() or p.read_text() == (show("HEAD", ".agent-team/ideas.md") or ""):
+            seed_doc(".agent-team/ideas.md")      # start from the newest copy (e.g. agent-team/meta)
         set_idea_status(p, a.slug, a.set)
         print(f"{a.slug}: {a.set}")
         return
+    if a.show:
+        for text in idea_sources():
+            block = idea_block(text, a.slug)
+            if block:
+                print(block.strip())
+                return 0
+        raise Fail(f"unknown slug '{a.slug}': not in .agent-team/ideas.md")
     info = idea_info(a.slug)
     print(f"status={info['status']} effort={info['effort'] or '?'}")
 
 
 def cmd_ci(a):
+    """Waits for checks to appear (GitHub can take a minute after a push) before deciding there is no CI."""
     pr = read_status(status_path(a.slug)).get("pr", "none")
     if pr in ("", "none"):
         raise Fail("no pr in status.md")
-    cmd = ["gh", "pr", "checks", pr] + (["--watch", "--interval", "30"] if a.watch else [])
-    r = run(cmd, cwd=work_dir(a.slug), check=False)
-    out = (r.stdout + r.stderr).strip()
-    if "no checks reported" in out.lower():
-        print("ci: none")
-        return 0
+    wd = work_dir(a.slug)
+    has_workflows = any((wd / ".github" / "workflows").glob("*.y*ml"))
+    grace = a.grace if a.grace is not None else (300 if has_workflows else 60)
+    deadline = time.monotonic() + grace
+    while True:
+        r = run(["gh", "pr", "checks", pr], cwd=wd, check=False)
+        out = (r.stdout + r.stderr).strip()
+        if "no checks reported" not in out.lower():
+            break
+        if time.monotonic() >= deadline:
+            print(f"ci: none (no checks appeared within {grace}s)")
+            return 0
+        time.sleep(POLL_SECONDS)
+    if a.watch:
+        r = run(["gh", "pr", "checks", pr, "--watch", "--interval", "30"], cwd=wd, check=False)
+        out = (r.stdout + r.stderr).strip()
     if r.returncode == 0:
         print("ci: pass")
         return 0
@@ -679,19 +815,184 @@ def cmd_summary(a):
     print("\n".join(rows))
 
 
+def merged_pr_head(pr, cwd):
+    """Head commit of a merged PR, or None (not merged, unknown, or gh unavailable)."""
+    if pr in ("", "none", None):
+        return None
+    r = run(["gh", "pr", "view", pr, "--json", "state,headRefOid", "-q", '.state + " " + .headRefOid'],
+            cwd=cwd, check=False)
+    state, _, oid = r.stdout.strip().partition(" ")
+    return oid if r.returncode == 0 and state == "MERGED" and oid else None
+
+
 def cmd_cleanup(a):
+    """Remove a feature's worktree and branches — only when nothing would be lost (or --force)."""
     root = repo_root()
     wt = worktree(a.slug)
     branch = f"feature/{a.slug}"
+    sp = status_path(a.slug)
+    pr = read_status(sp).get("pr", "none") if sp.exists() else "none"
+    git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
+    pr_head = merged_pr_head(pr, root)
+    problems = []
+    if wt.exists() and git("status", "--porcelain", cwd=wt):
+        problems.append(f"uncommitted changes in {wt}")
+    tip = git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=root, check=False)
+    if tip and tip != pr_head and not git("branch", "-r", "--contains", tip, cwd=root, check=False):
+        n = git("rev-list", "--count", tip, "--not", "--remotes", cwd=root, check=False)
+        problems.append(f"{n} commit(s) on {branch} are not on the remote and not in a merged PR")
+    remote_tip = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False)
+    if a.remote and remote_tip and remote_tip != pr_head and remote_tip != tip:
+        problems.append(f"origin/{branch} has commits that are neither local nor the merged PR's head")
+    if problems and not a.force:
+        raise Fail("not cleaning up: " + "; ".join(problems) + ". Push or discard them, or rerun with --force.")
     if wt.exists():
         git("worktree", "remove", "--force", str(wt), cwd=root)
         print(f"removed worktree {wt}")
-    if git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=root, check=False):
+    if tip:
         git("branch", "-D", branch, cwd=root)
         print(f"deleted local {branch}")
-    if a.remote and git("ls-remote", "--heads", "origin", branch, cwd=root, check=False):
+    if a.remote and remote_tip:
         git("push", "origin", "--delete", branch, cwd=root)
         print(f"deleted origin/{branch}")
+
+
+# ---------- docs commits (never on the local default branch) ----------
+
+def _expand_paths(root, paths):
+    files = []
+    for p in paths:
+        out = git("ls-files", "-com", "--exclude-standard", "--", p, cwd=root, check=False)
+        files += [f for f in out.splitlines() if f] or ([p] if (root / p).is_file() else [])
+    return list(dict.fromkeys(files))
+
+
+def _merge_into(tmp_root, root, rel):
+    """3-way merge of the checkout's edits (HEAD -> working copy) into the temp worktree's copy."""
+    theirs_p = root / rel
+    if not theirs_p.exists():
+        return False
+    theirs = theirs_p.read_text()
+    rec = _seed_record(root, rel)
+    base = rec.read_text() if rec.exists() else (show("HEAD", rel, root) or "")
+    ours_p = tmp_root / rel
+    ours = ours_p.read_text() if ours_p.exists() else ""
+    if theirs == base or theirs == ours:
+        return False
+    if ours == base:
+        merged = theirs
+    else:
+        tmp = tmp_root.parent / f".merge-{os.getpid()}"
+        tmp.mkdir(exist_ok=True)
+        try:
+            for name, text in (("ours", ours), ("base", base), ("theirs", theirs)):
+                (tmp / name).write_text(text)
+            r = run(["git", "merge-file", "-p", str(tmp / "ours"), str(tmp / "base"), str(tmp / "theirs")],
+                    check=False)
+        finally:
+            for f in tmp.iterdir():
+                f.unlink()
+            tmp.rmdir()
+        if r.returncode:
+            raise Fail(f"can't merge {rel}: it changed both here and on the branch being updated; "
+                       f"merge or pull that first")
+        merged = r.stdout
+    ours_p.parent.mkdir(parents=True, exist_ok=True)
+    ours_p.write_text(merged)
+    return True
+
+
+def _docs_attempt(root, d, files, msg, to_meta):
+    meta_exists = bool(git("ls-remote", "--heads", "origin", META, cwd=root, check=False))
+    base = f"origin/{META}" if to_meta and meta_exists else f"origin/{d}"
+    tmp_root = root / ".agent-team" / "worktrees" / "_docs"
+    if tmp_root.exists():
+        git("worktree", "remove", "--force", str(tmp_root), cwd=root, check=False)
+    git("worktree", "add", "-q", "--detach", str(tmp_root), base, cwd=root)
+    try:
+        if base != f"origin/{d}":
+            r = run(["git", "merge", "-q", "--no-edit", f"origin/{d}"], cwd=tmp_root, check=False)
+            if r.returncode:
+                run(["git", "merge", "--abort"], cwd=tmp_root, check=False)
+                raise Fail(f"{META} conflicts with {d}; merge its open PR (or fix it) first")
+        changed = [f for f in files if _merge_into(tmp_root, root, f)]
+        if not changed:
+            return None, []
+        git("add", "--", *changed, cwd=tmp_root)
+        git("commit", "-q", "-m", msg, cwd=tmp_root)
+        target = META if to_meta else d
+        r = run(["git", "push", "origin", f"HEAD:refs/heads/{target}"], cwd=tmp_root, check=False)
+        if r.returncode:
+            err = (r.stderr or r.stdout).strip()
+            if not to_meta and PROTECTED.search(err):
+                return "protected", changed
+            raise Fail(f"push to {target} rejected: {err.splitlines()[-1] if err else '?'} — "
+                       f"pull and rerun; never force-push")
+        return target, changed
+    finally:
+        git("worktree", "remove", "--force", str(tmp_root), cwd=root, check=False)
+
+
+def _meta_pr(root, d, title):
+    r = run(["gh", "pr", "list", "--head", META, "--state", "open", "--json", "url", "-q", ".[0].url"],
+            cwd=root, check=False)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
+    r = run(["gh", "pr", "create", "--base", d, "--head", META, "--title", title,
+             "--body", "agent-team docs (ideas, project context, lessons). Merge to bring them onto the default branch."],
+            cwd=root, check=False)
+    return r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else None
+
+
+def cmd_docs_pull(a):
+    git("fetch", "-q", "origin", cwd=repo_root(), check=False)
+    updated = [rel for rel in DOCS if seed_doc(rel)]
+    print("updated: " + (" ".join(updated) if updated else "nothing (checkout copies are current)"))
+
+
+def cmd_docs_commit(a):
+    """Commit agent-team docs edited in the checkout without committing on the local default branch:
+    a temp worktree gets the edits, pushes to the default branch, or to agent-team/meta (+ PR) if it's
+    protected or meta already has unmerged docs. The checkout's copies are then reset to match."""
+    root = repo_root()
+    d = default_branch(root)
+    git("fetch", "-q", "origin", cwd=root)
+    files = _expand_paths(root, a.paths)
+    if not files:
+        raise Fail("nothing to commit: none of those paths exist")
+    meta_exists = bool(git("ls-remote", "--heads", "origin", META, cwd=root, check=False))
+    meta_open = meta_exists and git("diff", "--name-only", f"origin/{d}", f"origin/{META}", "--", ".agent-team",
+                                    cwd=root, check=False) != ""
+    target, changed = _docs_attempt(root, d, files, a.message, to_meta=meta_open)
+    if target == "protected":
+        target, changed = _docs_attempt(root, d, files, a.message, to_meta=True)
+    if target is None:
+        print("nothing changed")
+        return 0
+    # The edits are on the remote now; reset the checkout's copies so later pulls fast-forward
+    # (git refuses a pull over local changes even when they're identical to what's coming in).
+    for f in changed:
+        _seed_record(root, f).unlink(missing_ok=True)
+    for f in changed:
+        if show("HEAD", f, root) is not None:
+            git("checkout", "HEAD", "--", f, cwd=root)
+        else:
+            (root / f).unlink(missing_ok=True)
+    if target == d:
+        on_d = git("rev-parse", "--abbrev-ref", "HEAD", cwd=root, check=False) == d
+        r = run(["git", "merge", "-q", "--ff-only", f"origin/{d}"], cwd=root, check=False) if on_d else \
+            subprocess.CompletedProcess([], 1)
+        print(f"pushed to {d}" + ("" if r.returncode == 0 else f" (your checkout isn't on {d} or has local "
+                                                                 f"commits: pull it yourself)"))
+    else:
+        url = _meta_pr(root, d, a.title or "agent-team: docs")
+        print(f"pushed to {META} ({d} is protected or has an open docs PR). "
+              + (f"PR: {url}" if url else f"Open a PR from {META} into {d}."))
+    print("files: " + " ".join(changed))
+    if target != d and any(not f.startswith(".agent-team/") for f in changed):
+        print(f"note: tool settings in that PR apply here once it's merged and pulled; "
+              f"until then the tools may ask for permissions")
+    return 0
 
 
 # ---------- upgrade (repos set up by an older agent-team) ----------
@@ -777,7 +1078,8 @@ def cmd_upgrade(a):
         print(".codex/config.toml: created")
     gi = root / ".gitignore"
     lines = gi.read_text().splitlines() if gi.exists() else []
-    if WORKTREES_IGNORE not in lines:
+    norm = {l.strip().strip("/").rstrip("*").rstrip("/") for l in lines}
+    if ".agent-team/worktrees" not in norm:
         gi.write_text("\n".join(lines + [WORKTREES_IGNORE]) + "\n")
         changed.append(".gitignore")
         print(f".gitignore: added {WORKTREES_IGNORE}")
@@ -808,6 +1110,8 @@ def build_parser():
     s.add_argument("--tool", choices=["claude", "codex", "gemini", "other"]); s.set_defaults(fn=cmd_tier)
     s = sub.add_parser("tasks", help="unticked plan tasks, batched by tier")
     s.add_argument("slug"); s.set_defaults(fn=cmd_tasks)
+    s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
+    s.add_argument("slug"); s.add_argument("kind", choices=["review", "qa"]); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("diff", help="feature diff without .agent-team/, lockfiles and generated code")
     s.add_argument("slug"); s.add_argument("--since", metavar="SHA")
     s.add_argument("--stat", action="store_true"); s.add_argument("--shortstat", action="store_true")
@@ -820,18 +1124,32 @@ def build_parser():
     s = sub.add_parser("push", help="push the feature branch; explains a rejection")
     s.add_argument("slug"); s.set_defaults(fn=cmd_push)
     s = sub.add_parser("idea", help="print or set an idea's status")
-    s.add_argument("slug"); s.add_argument("--set", choices=IDEA_STATUSES); s.set_defaults(fn=cmd_idea)
+    s.add_argument("slug"); s.add_argument("--set", choices=IDEA_STATUSES)
+    s.add_argument("--show", action="store_true", help="print the idea's entry (wherever it lives)")
+    s.set_defaults(fn=cmd_idea)
     s = sub.add_parser("ci", help="PR check result: pass, fail, none or pending")
-    s.add_argument("slug"); s.add_argument("--watch", action="store_true"); s.set_defaults(fn=cmd_ci)
+    s.add_argument("slug"); s.add_argument("--watch", action="store_true")
+    s.add_argument("--grace", type=int, help="seconds to wait for checks to appear (default 300 with "
+                                             ".github/workflows, else 60)")
+    s.set_defaults(fn=cmd_ci)
     s = sub.add_parser("pr-body", help="print the PR body")
     s.add_argument("slug"); s.add_argument("--summary"); s.add_argument("--stopped", metavar="REASON")
     s.set_defaults(fn=cmd_pr_body)
     s = sub.add_parser("summary", help="all features: stage, rounds, tokens, cost")
     s.set_defaults(fn=cmd_summary)
+    s = sub.add_parser("docs-pull", help="refresh the checkout's agent-team docs from agent-team/meta while "
+                                       "its PR is open (run before a role edits them)")
+    s.set_defaults(fn=cmd_docs_pull)
+    s = sub.add_parser("docs-commit", help="commit agent-team docs to the default branch (or agent-team/meta "
+                                         "if protected) without committing on the local default branch")
+    s.add_argument("-m", "--message", required=True); s.add_argument("--title")
+    s.add_argument("paths", nargs="+"); s.set_defaults(fn=cmd_docs_commit)
     s = sub.add_parser("upgrade", help="bring a repo set up by an older agent-team up to date (adds only)")
     s.set_defaults(fn=cmd_upgrade)
     s = sub.add_parser("cleanup", help="remove a merged feature's worktree and branches")
-    s.add_argument("slug"); s.add_argument("--remote", action="store_true"); s.set_defaults(fn=cmd_cleanup)
+    s.add_argument("slug"); s.add_argument("--remote", action="store_true")
+    s.add_argument("--force", action="store_true", help="also when it would lose unpushed or uncommitted work")
+    s.set_defaults(fn=cmd_cleanup)
     return ap
 
 
@@ -842,6 +1160,9 @@ def main(argv=None):
     except Fail as e:
         print(f"error: {e}", file=sys.stderr)
         return e.code
+    except (OSError, ValueError, KeyError) as e:
+        print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

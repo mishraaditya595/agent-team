@@ -295,9 +295,10 @@ def test_summary_lists_features(repo, capsys):
 
 def test_cleanup_removes_worktree_and_branch(repo):
     wt, fd = new_feature(repo)
-    at.main(["cleanup", "tiny"])
+    assert at.main(["push", "tiny"]) == 0
+    assert at.main(["cleanup", "tiny", "--remote"]) == 0
     assert not wt.exists()
-    assert "feature/tiny" not in sh("git", "branch", cwd=repo)
+    assert "feature/tiny" not in sh("git", "branch", "-a", cwd=repo)
 
 
 V1_PROJECT = """# Demo — project context
