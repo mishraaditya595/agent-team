@@ -51,3 +51,29 @@ def test_role_length_limit(make_repo):
 def test_missing_frontmatter_reported(make_repo):
     errs = validate_repo(make_repo({"dev": "# no frontmatter\n"}))
     assert has(errs, "no frontmatter")
+
+
+def test_agents_model_matches_tier(make_repo):
+    root = make_repo({"dev": role_md("dev", tier="fast")})
+    (root / "agents").mkdir()
+    (root / "agents" / "dev.md").write_text("---\nname: dev\ndescription: d\nmodel: opus\n---\nx\n")
+    assert has(validate_repo(root), "agents/dev.md: model 'opus' != 'haiku'")
+
+
+def test_role_without_agent_file_reported(make_repo):
+    root = make_repo({"dev": role_md("dev")})
+    (root / "agents").mkdir()
+    assert has(validate_repo(root), "agents/dev.md: missing")
+
+
+def test_real_repo_is_valid():
+    from conftest import ROOT
+    assert validate_repo(ROOT) == []
+
+
+def test_plugin_manifests_parse():
+    import json
+    from conftest import ROOT
+    plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
+    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
+    assert plugin["name"] == "agent-team" == market["plugins"][0]["name"]

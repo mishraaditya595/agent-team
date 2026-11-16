@@ -1,0 +1,8 @@
+{
+  "name": "agent-team",
+  "version": "0.1.0",
+  "description": "A portable AI product team: PM, Tech Lead, Developer, Reviewer, QA and Marketing, with cost-aware model tiers.",
+  "author": { "name": "Adi" },
+  "license": "MIT",
+  "keywords": ["agents", "skills", "product", "code-review", "qa", "marketing"]
+}

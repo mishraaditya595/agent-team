@@ -75,11 +75,37 @@ def _check_skill(skill_md: Path) -> list[str]:
     return errors
 
 
+def _check_agents(root: Path, roles: dict[str, str]) -> list[str]:
+    """Claude subagent files: one per role, model = models.yaml claude[role tier]."""
+    agents = root / "agents"
+    if not agents.is_dir():
+        return []
+    claude = load_models(root / "config" / "models.yaml").get("claude") or {}
+    errors = []
+    for name, tier in roles.items():
+        path = agents / f"{name}.md"
+        if not path.exists():
+            errors.append(f"agents/{name}.md: missing")
+            continue
+        fm = parse_frontmatter(path.read_text()) or {}
+        want = claude.get(tier)
+        if fm.get("model") != want:
+            errors.append(f"agents/{name}.md: model '{fm.get('model')}' != '{want}'")
+    return errors
+
+
 def validate_repo(root: Path) -> list[str]:
     root = Path(root)
     errors = _check_models(root)
+    roles = {}
     for skill_md in sorted((root / "skills").glob("*/SKILL.md")):
         errors += _check_skill(skill_md)
+        fm = parse_frontmatter(skill_md.read_text()) or {}
+        meta = fm.get("metadata") or {}
+        if meta.get("kind") == "role":
+            roles[skill_md.parent.name] = meta.get("tier")
+    if (root / "config" / "models.yaml").exists():
+        errors += _check_agents(root, roles)
     return errors
 
 
