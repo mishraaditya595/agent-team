@@ -7,6 +7,11 @@ these MIT-licensed projects. Thank you to their authors.
 - obra/superpowers — https://github.com/obra/superpowers
   Brainstorm → plan → execute flow, fresh context per task, spec-compliance-then-quality review,
   "evidence before claiming done", and the one-skills-folder / per-tool-manifest packaging.
+  Tech Lead plans from `writing-plans` and `test-driven-development`; Developer discipline from
+  `executing-plans` and `systematic-debugging`; Reviewer practice from `requesting-code-review`.
+- mattpocock/skills — https://github.com/mattpocock/skills
+  The `grill-me` / `grilling` interview (design tree, frontier rounds, recommended answers) used
+  by the Tech Lead to grill the PM's spec.
 - garrytan/gstack — https://github.com/garrytan/gstack
   CEO-style ideation scope modes (expand / hold / reduce), eng-manager plan checklist,
   paranoid "bugs that pass CI" review lens, surfacing only taste decisions to the human.
@@ -18,6 +23,8 @@ these MIT-licensed projects. Thank you to their authors.
 - DietrichGebert/ponytail — https://github.com/DietrichGebert/ponytail
   The YAGNI ladder and the over-engineering (simplicity) review pass.
 - coreyhaines31/marketingskills — https://github.com/coreyhaines31/marketingskills
-  One shared product-marketing context read first, then focused marketing pieces.
+  One shared product-marketing context read first, then focused marketing pieces; the Instagram,
+  blog, LinkedIn and Reddit playbooks and the no-AI-tells list draw on its `social`,
+  `content-strategy`, `community-marketing` and `copywriting` skills.
 
 Skill format: the Agent Skills open standard (https://agentskills.io).

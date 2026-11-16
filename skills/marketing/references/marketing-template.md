@@ -9,6 +9,7 @@ slug: <slug> · PR: <link> · tier: <standard|deep>
 <Main-channel post.>
 
 ## Social posts
+<!-- One subsection per channel in project.md ## Channels, each in its playbook's output format (instagram.md, blog.md, linkedin.md, reddit.md, else social-posts.md). -->
 ### <Channel from project.md>
 <Post.>
 

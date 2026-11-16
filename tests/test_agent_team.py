@@ -349,3 +349,39 @@ def test_upgrade_v1_repo(repo, capsys):
 def test_intake_tier(repo, capsys):
     r = tier(capsys, "pm-intake")
     assert r["tier"] == "standard" and r["model"] == "sonnet"
+
+
+def test_grill_stage_and_round_accepted(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    assert at.main(["status", "tiny", "--set", "stage=grill", "grill_round=2", "stopped_at=grill"]) == 0
+    capsys.readouterr()
+    at.main(["status", "tiny", "grill_round"])
+    assert capsys.readouterr().out.strip() == "2"
+
+
+def test_pr_body_lists_assumed_decisions_and_rulings(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    (fd / "grill.md").write_text("x")
+    (fd / "spec.md").write_text(SPEC + "\n## Decisions\n- G1 (answered): lists sort by date — spec AC2\n"
+                                 "- G2 (assumed): empty list shows a hint — PM: matches other screens\n"
+                                 "- G3 (owner): free tier keeps it — Adi\n")
+    (fd / "plan.md").write_text(PLAN + "\n## Rulings\n- T3: Ruling: used existing cache — signature in plan was wrong — "
+                                "stale reads if wrong\n")
+    at.main(["pr-body", "tiny", "--summary", "Adds tiny."])
+    out = capsys.readouterr().out
+    assert "grill.md" in out
+    assert "## Decisions to check" in out
+    assert "G2 (assumed): empty list shows a hint" in out
+    assert "G1 (answered)" not in out and "G3 (owner)" not in out
+    assert "T3: Ruling: used existing cache" in out
+
+
+def test_pr_body_without_decisions_has_no_section(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    at.main(["pr-body", "tiny", "--summary", "Adds tiny."])
+    assert "## Decisions to check" not in capsys.readouterr().out
+
+
+def test_marketing_topic_tier_needs_no_slug(repo, capsys):
+    r = tier(capsys, "marketing-topic")
+    assert r["tier"] == "standard" and r["model"] == "sonnet"

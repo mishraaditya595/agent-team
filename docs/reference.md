@@ -24,6 +24,10 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 4. Review and merge the PR.
 5. `team-wrap <slug>`, then optionally `team-market <slug>`.
 
+Anytime: `team-market --topic "<idea, plan path or topic>" [--channels instagram,blog,linkedin,reddit]` drafts content for something that isn't a merged feature, into `.agent-team/marketing/`.
+
+**The grill.** Before planning, the Tech Lead questions the PM in rounds (`grill.md`, at most 3). The PM answers from the spec, makes minor calls itself (`assumed`), or marks a question `owner` when it changes scope or what users see — then the run stops with a draft PR until you answer in `grill.md` and re-run `team-build <slug>`. The PR's **Decisions to check** section lists every `assumed` answer and every developer ruling.
+
 **Set up with an earlier version?** Merge the update, re-run `install.sh`, then run `team-init upgrade` in each product repo — it adds the new `project.md` sections and permissions without touching what you wrote.
 
 If `main` is branch-protected, `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own. While a meta PR is open, the workflows also put its newer docs into your checkout as uncommitted copies; to update `main` in that repo, use **`agent-team pull`** rather than `git pull` — it puts back copies nobody edited, so the fast-forward works after a squash merge (manual fix if needed: `git checkout -- .agent-team`). Merge the setup PR before the first `team-build`.
@@ -42,7 +46,7 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `push <slug>` / `lease <slug>` | push with a clear message on rejection (never forced); a lease that's committed and pushed, so only one machine runs a feature |
 | `next <slug> review\|qa` | the next review/QA file number — continues across stops, so earlier reports are never overwritten |
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |
-| `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links and the tier/cost log |
+| `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links, the decisions to check (assumed grill answers, developer rulings) and the tier/cost log |
 | `idea <slug> [--set …\|--show]` / `summary` | idea lifecycle and lookup; all-feature summary |
 | `cleanup <slug> [--remote]` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work, and `--remote` deletes the remote branch only if it was merged (`--force` to override) |
 | `pull` / `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected; `pull` replaces `git pull` in the workflows |
@@ -55,11 +59,12 @@ Roles name a **tier**; `skills/team-build/references/models.yaml` maps tiers to 
 | Role | Default | Moves |
 |---|---|---|
 | PM | deep (Opus) | standard when shaping your own idea (`add`), and for the spec when the idea's effort is S |
-| Tech Lead | deep | standard for tiny specs (≤ 2 ACs, effort S) |
+| Tech Lead (grill + plan) | deep | standard for tiny specs (≤ 2 ACs, effort S) |
+| PM answering the grill | as PM spec | |
 | Developer | each task's tag (fast/standard) | a task that fails twice → standard; fixes for findings run at standard |
 | Reviewer | standard | diff > 400 lines or > 15 files (noise excluded), or security touchpoints in the plan → deep |
 | QA | fast | plan says `qa-ui: yes` → standard |
-| Marketing | standard | `launch: true` → deep |
+| Marketing | standard | `launch: true` → deep; topic mode (`marketing-topic`) stays standard |
 
 Override per project in `project.md` → `## Model overrides`. Each feature's `status.md` logs the tier, model and (where the tool reports it) tokens and cost of every stage; `team-status` totals them.
 

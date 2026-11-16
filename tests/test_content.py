@@ -323,3 +323,101 @@ def test_workflows_pull_with_agent_team_pull():
         text = read(f"skills/{wf}/SKILL.md")
         assert "`agent-team pull`" in text and "git pull --ff-only" not in text, wf
     assert "`agent-team pull`" in read("skills/team-init/SKILL.md")
+
+
+# ---------- upstream practices (2026-11-16) ----------
+
+def test_tech_lead_grill_mode():
+    text = read("skills/tech-lead/SKILL.md")
+    for k in ("Grill mode", "references/grilling.md", "grill.md", "## Decisions"):
+        assert k in text, k
+    g = read("skills/tech-lead/references/grilling.md")
+    for k in ("design tree", "frontier", "recommended answer", "look it up", "3 rounds"):
+        assert k in g, k
+    t = read("skills/tech-lead/references/grill-template.md")
+    for k in ("## Round 1", "G1", "**Answer:**", "answered", "assumed", "owner"):
+        assert k in t, k
+
+
+def test_pm_answer_mode():
+    text = read("skills/pm/SKILL.md")
+    for k in ("Answer mode", "grill.md", "answered", "assumed", "owner", "scope", "users see"):
+        assert k in text, k
+
+
+def test_team_build_grill_stage():
+    text = read("skills/team-build/SKILL.md")
+    for k in ("**grill**", "grill_round", "stopped_at=grill", "owner question", "3 grill rounds"):
+        assert k in text, k
+    assert "spec | grill | plan" in read("skills/team-build/references/status-template.md")
+
+
+def test_plan_template_writing_plans_blocks():
+    text = read("skills/tech-lead/references/plan-template.md")
+    for k in ("## Global constraints", "## Review focus", "## Rulings", "Interfaces:", "Failing test:",
+              "Run:", "Expected:"):
+        assert k in text, k
+
+
+def test_tech_lead_tdd_and_self_review():
+    text = read("skills/tech-lead/SKILL.md")
+    for k in ("watch it fail", "Review focus", "Interfaces", "self-review"):
+        assert k in text, k
+    chk = read("skills/tech-lead/references/plan-checklist.md")
+    for k in ("Spec coverage", "Step scan", "Name consistency", "Review focus", "Proportion"):
+        assert k in chk, k
+
+
+def test_developer_executing_plans_discipline():
+    text = read("skills/developer/SKILL.md")
+    for k in ("Ruling:", "## Rulings", "Expected:", "completion contract", "references/debugging.md",
+              "watch it fail"):
+        assert k in text, k
+
+
+def test_debugging_reference_phases():
+    text = read("skills/developer/references/debugging.md")
+    for k in ("root cause", "Reproduce", "working example", "one hypothesis", "failing test",
+              "3 fixes", "design problem"):
+        assert k in text, k
+
+
+def test_reviewer_requesting_code_review_practices():
+    text = read("skills/reviewer/SKILL.md")
+    for k in ("Critical", "Important", "Minor", "reasonable user", "Review focus", "Rulings", "Declined to judge",
+              "Strengths"):
+        assert k in text, k
+    t = read("skills/reviewer/references/review-template.md")
+    for k in ("## Strengths", "## Review focus & rulings", "## Declined to judge", "[critical]", "[important]",
+              "[minor]"):
+        assert k in t, k
+
+
+CHANNELS = ("instagram", "blog", "linkedin", "reddit")
+
+
+def test_marketing_channel_playbooks():
+    for ch in CHANNELS:
+        assert len(read(f"skills/marketing/references/{ch}.md").splitlines()) > 10, ch
+    assert "carousel" in read("skills/marketing/references/instagram.md").lower()
+    assert "Visual brief" in read("skills/marketing/references/instagram.md")
+    assert "meta description" in read("skills/marketing/references/blog.md").lower()
+    assert "link in the first comment" in read("skills/marketing/references/linkedin.md").lower()
+    r = read("skills/marketing/references/reddit.md").lower()
+    for k in ("subreddit rules", "builder", "value first"):
+        assert k in r, k
+    tells = read("skills/marketing/references/no-ai-tells.md")
+    for k in ("not x. y.", "engagement bait", "em dash"):
+        assert k in tells.lower(), k
+
+
+def test_marketing_two_modes():
+    text = read("skills/marketing/SKILL.md")
+    for k in ("Feature mode", "Topic mode", "no-ai-tells.md", ".agent-team/marketing/", *[f"references/{c}.md" for c in CHANNELS]):
+        assert k in text, k
+    t = read("skills/team-market/SKILL.md")
+    for k in ("--topic", "marketing-topic", ".agent-team/marketing/"):
+        assert k in t, k
+    tmpl = read("skills/marketing/references/topic-template.md")
+    for h in ("## Instagram", "## Blog", "## LinkedIn", "## Reddit"):
+        assert h in tmpl, h
