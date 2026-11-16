@@ -5,58 +5,79 @@ A portable AI product team for products you've already built. Six roles — **PM
 You approve twice: **which feature to build**, and **the merge**. Everything in between runs on its own.
 
 ```
-team-ideate ─► PM proposes ideas ─► you pick one (Gate 1)
+team-ideate ─► PM proposes ideas ─► you pick one (Gate 1)   [team-ideate reject <slug> to drop one]
 team-build <slug>
-   PM spec ─► Tech Lead plan ─► Developer (TDD) ─► Reviewer (3 passes, ≤3 rounds)
-           ─► QA vs acceptance criteria (≤2 rounds) ─► PR
+   PM spec ─► Tech Lead plan ─► Developer (TDD, per task batch)
+           ─► sync with main ─► Reviewer (3 passes, ≤3 rounds, re-checks open findings)
+           ─► QA vs acceptance criteria (≤2 rounds) ─► sync ─► PR ─► CI (1 fix round)
 you merge (Gate 2)
+team-wrap <slug>   ─► mark shipped, lessons → .agent-team/lessons.md, clean up branches
 team-market <slug> ─► Marketing drafts (nothing is posted)
+team-status        ─► every feature's stage, rounds and cost
 ```
 
-If a limit is hit (too many review/QA rounds, a broken build, a spec problem), you get a **draft PR** with the reason instead of a question mid-run.
+If a limit is hit (too many review/QA/CI rounds, a broken build, a merge conflict, a spec problem), you get a **draft PR** with the reason instead of a question mid-run.
 
 ## Install (on every machine)
 
 ```bash
-git clone https://github.com/<owner>/agent-team ~/agent-team
+git clone https://github.com/mishraaditya595/agent-team ~/agent-team
 pip install pyyaml            # for the Codex profiles step
 ~/agent-team/scripts/install.sh
 ```
 
-`install.sh` links the skills into `~/.claude/skills` and `~/.agents/skills` (read by Codex and other tools), and writes `at-deep` / `at-standard` / `at-fast` profiles into `~/.codex/config.toml` without touching your other settings. It's safe to re-run; `git pull` + re-run to update.
+`install.sh` links the skills into `~/.claude/skills` and `~/.agents/skills` (read by Codex and other tools), puts the **`agent-team` helper CLI** on your PATH (`~/.local/bin`), and writes `at-deep` / `at-standard` / `at-fast` profiles (model + reasoning effort) into `~/.codex/config.toml` without touching your other settings. It's safe to re-run; `git pull` + re-run to update.
 
-Alternatives:
-- **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add <owner>/agent-team`, then `/plugin install agent-team@agent-team`.
-- **Any Agent Skills tool:** `npx skills add <owner>/agent-team`.
+Alternatives (both skip the PATH step — the workflows then call `python3 <team-build skill>/scripts/agent_team.py`, which asks for permission the first time):
+- **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add mishraaditya595/agent-team`, then `/plugin install agent-team@agent-team`.
+- **Any Agent Skills tool:** `npx skills add mishraaditya595/agent-team`.
 
 ## First run in a product repo
 
-1. `team-init` — creates `.agent-team/`, drafts `project.md` from the codebase, and writes permission settings so builds don't stop for prompts. Read `project.md` once and fix it (especially positioning, voice and channels).
+1. `team-init` — creates `.agent-team/`, drafts `project.md` from the codebase (owner, build/test commands, voice, channels), and writes permission settings so builds don't stop for prompts. Read `project.md` once and fix it.
 2. `team-ideate [expand|hold|reduce]` — up to 5 ideas in `.agent-team/ideas.md`.
-3. `team-build <slug>` — runs in its own git worktree on `feature/<slug>`; your checkout is never touched. Resumable on any machine from `.agent-team/features/<slug>/status.md`.
+3. `team-build <slug>` — runs in its own git worktree on `feature/<slug>`; your checkout is never touched. Resumable on any machine from `.agent-team/features/<slug>/status.md`; a lease stops two machines running the same feature at once. Start it in a standard-tier session (e.g. Sonnet) — the roles pick their own models.
 4. Review and merge the PR.
-5. `team-market <slug>` — drafts in `marketing.md`.
+5. `team-wrap <slug>`, then optionally `team-market <slug>`.
+
+If `main` is branch-protected, `team-init`, `team-ideate` and `team-wrap` push their docs to an `agent-team/meta` branch and open a PR for it instead.
+
+## The helper CLI
+
+The workflows hand every deterministic step to `agent-team` (stdlib Python, `skills/team-build/scripts/agent_team.py`) instead of having the model work it out each time — cheaper and exact:
+
+| Command | Does |
+|---|---|
+| `tier <role> <slug>` | picks tier, model and effort from the rules, `models.yaml` and project overrides |
+| `tasks <slug>` | unticked plan tasks, batched by tier, for per-batch developer dispatch |
+| `diff <slug> [--since SHA]` | the review diff without `.agent-team/`, lockfiles and generated code (`*.g.dart`, `*.freezed.dart`, …) |
+| `test <slug> [--build]` | runs the project's tests in the worktree; caches the result per code commit |
+| `sync <slug>` | merges the default branch in; reports conflicts |
+| `push <slug>` / `lease <slug>` | push with a clear message on rejection; one machine per feature |
+| `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |
+| `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links and the tier/cost log |
+| `idea <slug> [--set …]` / `summary` / `cleanup` | idea lifecycle, all-feature summary, post-merge cleanup |
 
 ## Models and cost
 
-Roles name a **tier**; `config/models.yaml` (a link to `skills/team-build/references/models.yaml`, so it ships with the skills however you install them) maps tiers to each tool's models. Check the Codex and Gemini model ids there against your accounts.
+Roles name a **tier**; `skills/team-build/references/models.yaml` maps tiers to each tool's models and reasoning effort. Check the Codex and Gemini model ids there against your accounts.
 
-| Role | Default | Moves up when |
+| Role | Default | Moves |
 |---|---|---|
-| PM | deep (Opus) | — |
-| Tech Lead | deep | drops to standard for tiny specs (≤ 2 ACs, effort S) |
-| Developer | fast (Haiku) per task tag | a task fails twice → standard (Sonnet) |
-| Reviewer | standard | > 400 lines, > 15 files, or auth/payments/migrations/security → deep |
-| QA | fast | UI/browser or exploratory testing → standard |
-| Marketing | standard | launch or new product → deep |
+| PM | deep (Opus) | spec on standard when the idea's effort is S |
+| Tech Lead | deep | standard for tiny specs (≤ 2 ACs, effort S) |
+| Developer | each task's tag (fast/standard) | a task that fails twice → standard; fixes for findings run at standard |
+| Reviewer | standard | diff > 400 lines or > 15 files (noise excluded), or security touchpoints in the plan → deep |
+| QA | fast | plan says `qa-ui: yes` → standard |
+| Marketing | standard | `launch: true` → deep |
 
-Override per project in `project.md` → `## Model overrides`. Each feature's `status.md` logs the tier and model every stage used.
+Override per project in `project.md` → `## Model overrides`. Each feature's `status.md` logs the tier, model and (where the tool reports it) tokens and cost of every stage; `team-status` totals them.
 
 ## Add a role
 
 1. `skills/<role>/SKILL.md` with `metadata: {kind: role, tier: …, allowed-tiers: […]}` and `## Reads`, `## Writes`, `## Never` sections (≤ 150 lines; detail in `references/`).
-2. `agents/<role>.md` with the Claude model for its tier.
-3. Reference it from a workflow skill (`team-build`, or a new `team-*`).
+2. `agents/<role>.md` with the Claude model for its tier and the skill's description.
+3. Add its tier rule to `agent_team.py` (`ROLES`, `rule_tier`) and reference it from a workflow skill.
 4. Run `python3 -m pytest -q && python3 scripts/validate.py .`
 
 ## Develop

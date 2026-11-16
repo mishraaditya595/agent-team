@@ -1,6 +1,6 @@
 # agent-team
 
-This repo is a portable AI product team: PM, Tech Lead, Developer, Reviewer, QA and Marketing roles written as Agent Skills. Skills live in `skills/`; each is a `SKILL.md` with portable frontmatter only. Model tiers live in `config/models.yaml`.
+This repo is a portable AI product team: PM, Tech Lead, Developer, Reviewer, QA and Marketing roles written as Agent Skills. Skills live in `skills/`; each is a `SKILL.md` with portable frontmatter only. Model tiers live in `skills/team-build/references/models.yaml`. Deterministic workflow steps live in the helper CLI `skills/team-build/scripts/agent_team.py` (stdlib only).
 
 ## Rules for any agent working here or using these skills
 
@@ -15,4 +15,5 @@ Full text: `skills/engineering-guidelines/SKILL.md`.
 ## Working on this repo
 
 - Run `python3 -m pytest -q` and `python3 scripts/validate.py .` before committing.
+- Keep `agent_team.py` stdlib-only (PyYAML optional) so it runs on any machine the skills are installed on.
 - Never put tool-specific frontmatter (e.g. `model:`) in `skills/**/SKILL.md`; tool-specific bits go in `agents/`, `.claude-plugin/` or `scripts/install.sh`.

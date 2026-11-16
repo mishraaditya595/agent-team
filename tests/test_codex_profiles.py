@@ -47,3 +47,10 @@ def test_missing_codex_tool_skips_cleanly(tmp_path, capsys):
     m.write_text("tools:\n  claude: {deep: a, standard: b, fast: c}\n")
     assert main(["x", str(m), str(c)]) == 0 and not c.exists()
     assert "no 'codex' tool" in capsys.readouterr().out
+
+
+def test_effort_written_per_profile():
+    data = tomllib.loads(render_profiles(MODELS, {"deep": "high", "fast": "low"}))
+    assert data["profiles"]["at-deep"]["model_reasoning_effort"] == "high"
+    assert data["profiles"]["at-fast"]["model_reasoning_effort"] == "low"
+    assert "model_reasoning_effort" not in data["profiles"]["at-standard"]
