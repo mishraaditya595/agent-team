@@ -110,3 +110,25 @@ def test_qa_never_changes_feature_code():
 def test_developer_escalation_rule():
     text = read("skills/developer/SKILL.md")
     assert "fails twice" in text
+
+
+def test_status_template_fields():
+    text = read("skills/team-build/references/status-template.md")
+    for k in ("stage:", "branch:", "review_round:", "qa_round:", "worktree:", "## Log"):
+        assert k in text, k
+    for s in ("spec", "plan", "implement", "review", "qa", "pr-open", "merged", "marketed"):
+        assert s in text, s
+
+
+def test_team_build_mentions_safeguards():
+    text = read("skills/team-build/SKILL.md")
+    for k in ("worktree", "--draft", "status.md is missing", "review rounds", "QA rounds",
+              "fallback", "400", "15 files", "Model overrides"):
+        assert k in text, k
+
+
+def test_dispatch_refs_exist():
+    expect = {"claude": "subagent", "codex": "codex exec --profile", "gemini": "gemini -m",
+              "generic": "intended="}
+    for tool, needle in expect.items():
+        assert needle in read(f"skills/team-build/references/dispatch-{tool}.md"), tool
