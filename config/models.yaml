@@ -1,0 +1,16 @@
+# Tier -> model id, per tool. Roles name a tier; this file names the model.
+# Edit here when models change. Per-project overrides: .agent-team/project.md "## Model overrides".
+# Codex/Gemini ids looked up 2026-11-16 — check `codex /model` and `gemini /model` and update as needed.
+tools:
+  claude:
+    deep: opus
+    standard: sonnet
+    fast: haiku
+  codex:
+    deep: gpt-5.5
+    standard: gpt-5.4
+    fast: gpt-5.4-mini
+  gemini:
+    deep: gemini-3.1-pro-preview
+    standard: gemini-3-flash-preview
+    fast: gemini-3.1-flash-lite
