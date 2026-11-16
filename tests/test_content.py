@@ -78,3 +78,35 @@ def test_plan_template_has_test_plan_heading():
     text = read("skills/tech-lead/references/plan-template.md")
     for h in ("## Approach", "## Data flow", "## Edge cases", "## Test plan", "## Tasks"):
         assert h in text, h
+
+
+def section(text, heading):
+    m = re.search(rf"^{re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    assert m, heading
+    return m.group(1)
+
+
+def test_review_template_three_passes():
+    text = read("skills/reviewer/references/review-template.md")
+    for h in ("## Pass 1 — Spec compliance", "## Pass 2 — Plan & code quality",
+              "## Pass 3 — Simplicity", "## Verdict"):
+        assert h in text, h
+    assert "APPROVED" in text and "CHANGES REQUESTED" in text
+
+
+def test_qa_template_columns():
+    assert "| AC | Method | Result (PASS/FAIL) | Evidence |" in read("skills/qa/references/qa-template.md")
+    assert "UNVERIFIED" in read("skills/qa/references/test-by-platform.md")
+
+
+def test_reviewer_never_edits():
+    assert "edit" in section(read("skills/reviewer/SKILL.md"), "## Never").lower()
+
+
+def test_qa_never_changes_feature_code():
+    assert "feature code" in section(read("skills/qa/SKILL.md"), "## Never").lower()
+
+
+def test_developer_escalation_rule():
+    text = read("skills/developer/SKILL.md")
+    assert "fails twice" in text
