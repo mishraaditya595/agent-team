@@ -7,6 +7,7 @@ Exit codes: 0 ok, 1 failure (message on stderr), 2 merge conflict (sync), 3 push
 """
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -24,6 +25,7 @@ STATUS_TEMPLATE = SKILL_DIR / "references" / "status-template.md"
 INIT_REFS = SKILLS / "team-init" / "references"
 WORKTREES_IGNORE = ".agent-team/worktrees/"
 META = "agent-team/meta"            # docs branch used when the default branch is protected
+REJECTED = re.compile(r"\[rejected\]|non-fast-forward|fetch first|stale info|\[remote rejected\]", re.I)
 PROTECTED = re.compile(r"protected branch|GH006|GH013|repository rule|required status|review is required", re.I)
 POLL_SECONDS = 15
 
@@ -62,6 +64,11 @@ def run(cmd, cwd=None, check=True, shell=False):
     if check and r.returncode:
         raise Fail((r.stderr or r.stdout).strip() or f"{cmd} failed")
     return r
+
+
+def _last_line(r):
+    lines = (r.stderr or r.stdout or "").strip().splitlines()
+    return lines[-1].strip() if lines else "?"
 
 
 def git(*args, cwd=None, check=True):
@@ -170,15 +177,58 @@ def show(ref, rel, cwd=None):
     return r.stdout if r.returncode == 0 else None
 
 
+def meta_pr_open(root):
+    """True/False when gh can tell whether agent-team/meta has an open PR; None when it can't."""
+    r = run(["gh", "pr", "list", "--head", META, "--state", "open", "--json", "number", "-q", "length"],
+            cwd=root, check=False)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() not in ("", "0")
+
+
+def _is_ancestor(a, b, root):
+    return run(["git", "merge-base", "--is-ancestor", a, b], cwd=root, check=False).returncode == 0
+
+
+def meta_newer(root, d, rel):
+    """Is agent-team/meta's copy of rel newer than the default branch's? Only if meta's last change to it
+    was built on top of the default branch's last change to it. After a squash merge (branch kept, as
+    GitHub does by default) that's never true, so a stale meta can't shadow later edits."""
+    if not git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{META}", cwd=root, check=False):
+        return False
+    ma = git("log", "-1", "--format=%H", f"origin/{META}", "--", rel, cwd=root, check=False)
+    da = git("log", "-1", "--format=%H", f"origin/{d}", "--", rel, cwd=root, check=False)
+    if not ma or ma == da:
+        return False
+    if not da or _is_ancestor(da, ma, root):
+        return True
+    if _is_ancestor(ma, da, root):
+        return False
+    t = lambda c: int(git("log", "-1", "--format=%ct", c, cwd=root, check=False) or 0)
+    return t(ma) > t(da)
+
+
+def meta_active(root, d, rel=None, pr_open="ask"):
+    """Should agent-team/meta's copy count (for one doc, or for any .agent-team file)?"""
+    if not git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{META}", cwd=root, check=False):
+        return False
+    if (meta_pr_open(root) if pr_open == "ask" else pr_open) is False:
+        return False                       # gh says its PR is merged/closed: the default branch is current
+    rels = [rel] if rel else git("diff", "--name-only", f"origin/{d}", f"origin/{META}", "--", ".agent-team",
+                                 cwd=root, check=False).splitlines()
+    return any(meta_newer(root, d, r) for r in rels)
+
+
 def read_doc(rel):
-    """An agent-team doc (project.md, ideas.md, lessons.md): an unmerged agent-team/meta copy wins
-    (protected default branch), else the local checkout, else origin/<default>."""
+    """An agent-team doc (project.md, ideas.md, lessons.md): agent-team/meta's copy while it's live
+    (open PR, newer than the default branch), else the local checkout, else origin/<default>."""
     root = repo_root()
     try:
-        main_v = show(f"origin/{default_branch(root)}", rel, root)
+        d = default_branch(root)
+        main_v = show(f"origin/{d}", rel, root)
     except Fail:
-        main_v = None
-    meta_v = show(f"origin/{META}", rel, root)
+        d, main_v = None, None
+    meta_v = show(f"origin/{META}", rel, root) if d and meta_active(root, d, rel) else None
     if meta_v is not None and meta_v != main_v:
         return meta_v
     local = root / rel
@@ -510,7 +560,7 @@ def cmd_status(a):
 
 def cmd_log(a):
     p = status_path(a.slug)
-    parts = [now_utc().strftime("%Y-%m-%d %H:%MZ"), a.stage, a.role]
+    parts = [now_utc().strftime("%Y-%m-%dT%H:%MZ"), a.stage, a.role]
     parts += [f"tier={a.tier}", f"model={a.model}"]
     if a.tokens:
         parts.append(f"tokens={a.tokens}")
@@ -571,11 +621,13 @@ def cmd_lease(a):
         raise Fail(f"the lease belongs to {host}, not {me()}; not releasing it")
     new = "none" if a.action == "release" else f"{me()} {now_utc().isoformat(timespec='minutes')}"
     write_status(p, {"owner": new})
-    committed = _commit_status(wt, a.slug, f"chore({a.slug}): lease {a.action} by {me()}")
+    committed = _commit_status(wt, a.slug, f"chore({a.slug}): lease {a.action} by {me()} [skip ci]")
     r = run(["git", "push", "-u", "origin", branch], cwd=wt, check=False)
     if r.returncode:
         if committed:
             run(["git", "reset", "-q", "--keep", "HEAD~1"], cwd=wt, check=False)
+        if not REJECTED.search(r.stderr or ""):
+            raise Fail(f"lease {a.action}: push failed (network, sign-in or permissions?): {_last_line(r)}")
         try:
             _catch_up(wt, branch)
         except Fail:
@@ -640,6 +692,9 @@ def cmd_test(a):
     text = project_md()
     p = feature_dir(wt, a.slug) / "status.md"
     key = code_key(wt)
+    cmds = (project_command("Build", text) or "") + "\n" + (project_command("Test", text) or "")
+    if key:
+        key += "+" + hashlib.sha1(cmds.encode()).hexdigest()[:6]
     cached = read_status(p).get("tests", "none")
     if key and not a.force and not a.build and cached.split(" ")[0] == key:
         print(f"tests (cached for {key}): {cached.split(' ', 1)[1]}")
@@ -694,10 +749,12 @@ def cmd_push(a):
     if r.returncode == 0:
         print(f"pushed {branch}")
         return 0
+    if not REJECTED.search(r.stderr or ""):
+        raise Fail(f"push failed (network, sign-in or permissions?): {_last_line(r)}")
     git("fetch", "-q", "origin", branch, cwd=wt, check=False)
     rs = run(["git", "show", f"origin/{branch}:.agent-team/features/{a.slug}/status.md"], cwd=wt, check=False)
     owner = read_status_text(rs.stdout).get("owner", "unknown") if rs.returncode == 0 else "unknown"
-    raise Fail(f"push rejected ({(r.stderr or '').strip().splitlines()[-1:] or ['?']}). Remote owner: {owner}. "
+    raise Fail(f"push rejected: {branch} has commits from elsewhere ({_last_line(r)}). Remote owner: {owner}. "
                f"Never force-push; stop and tell the owner.", code=3)
 
 
@@ -796,8 +853,16 @@ def cmd_summary(a):
         r = run(["git", "show", f"{ref}:.agent-team/features/{slug}/status.md"], cwd=root, check=False)
         if r.returncode == 0:
             sources.append((slug, r.stdout))
-    for p in sorted((root / ".agent-team" / "features").glob("*/status.md")):
-        sources.append((p.parent.name, p.read_text()))
+    try:
+        d = default_branch(root)
+        listed = git("ls-tree", "-r", "--name-only", f"origin/{d}", "--", ".agent-team/features", cwd=root, check=False)
+    except Fail:
+        d, listed = None, ""
+    for rel in sorted(listed.splitlines()):
+        m = re.fullmatch(r"\.agent-team/features/([^/]+)/status\.md", rel)
+        text = show(f"origin/{d}", rel, root) if m else None
+        if text is not None:
+            sources.append((m.group(1), text))
     for slug, text in sources:
         if slug in seen:
             continue
@@ -842,8 +907,14 @@ def cmd_cleanup(a):
         n = git("rev-list", "--count", tip, "--not", "--remotes", cwd=root, check=False)
         problems.append(f"{n} commit(s) on {branch} are not on the remote and not in a merged PR")
     remote_tip = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False)
-    if a.remote and remote_tip and remote_tip != pr_head and remote_tip != tip:
-        problems.append(f"origin/{branch} has commits that are neither local nor the merged PR's head")
+    if a.remote and remote_tip:
+        try:
+            in_default = _is_ancestor(remote_tip, f"origin/{default_branch(root)}", root)
+        except Fail:
+            in_default = False
+        if remote_tip != pr_head and not in_default:
+            problems.append(f"origin/{branch} is not merged (no merged PR with that head, and not in the "
+                            f"default branch); not deleting it")
     if problems and not a.force:
         raise Fail("not cleaning up: " + "; ".join(problems) + ". Push or discard them, or rerun with --force.")
     if wt.exists():
@@ -870,13 +941,19 @@ def _expand_paths(root, paths):
 def _merge_into(tmp_root, root, rel):
     """3-way merge of the checkout's edits (HEAD -> working copy) into the temp worktree's copy."""
     theirs_p = root / rel
-    if not theirs_p.exists():
-        return False
-    theirs = theirs_p.read_text()
     rec = _seed_record(root, rel)
-    base = rec.read_text() if rec.exists() else (show("HEAD", rel, root) or "")
+    base_v = rec.read_text() if rec.exists() else show("HEAD", rel, root)
+    base = base_v or ""
     ours_p = tmp_root / rel
     ours = ours_p.read_text() if ours_p.exists() else ""
+    if not theirs_p.exists():
+        if base_v is None or not ours_p.exists():
+            return False                   # never existed / already gone
+        if ours != base:
+            raise Fail(f"can't delete {rel}: it was changed on the branch being updated")
+        ours_p.unlink()
+        return True
+    theirs = theirs_p.read_text()
     if theirs == base or theirs == ours:
         return False
     if ours == base:
@@ -960,9 +1037,7 @@ def cmd_docs_commit(a):
     files = _expand_paths(root, a.paths)
     if not files:
         raise Fail("nothing to commit: none of those paths exist")
-    meta_exists = bool(git("ls-remote", "--heads", "origin", META, cwd=root, check=False))
-    meta_open = meta_exists and git("diff", "--name-only", f"origin/{d}", f"origin/{META}", "--", ".agent-team",
-                                    cwd=root, check=False) != ""
+    meta_open = meta_active(root, d)
     target, changed = _docs_attempt(root, d, files, a.message, to_meta=meta_open)
     if target == "protected":
         target, changed = _docs_attempt(root, d, files, a.message, to_meta=True)
@@ -1053,6 +1128,20 @@ def cmd_upgrade(a):
     proj = root / ".agent-team" / "project.md"
     if not proj.exists():
         raise Fail(".agent-team/project.md not found — run team-init first")
+    touched = [".agent-team/project.md", ".claude/settings.json", ".codex/config.toml", ".gitignore"]
+    dirty = git("status", "--porcelain", "--", *touched, cwd=root)
+    if dirty:
+        raise Fail("these files have uncommitted changes of your own; commit or stash them first so they "
+                   "don't get swept into the upgrade commit:\n" + dirty)
+    sp = root / ".claude" / "settings.json"
+    try:
+        data = json.loads(sp.read_text()) if sp.exists() else {}
+    except ValueError as e:
+        raise Fail(f".claude/settings.json isn't valid JSON ({e}); fix it first — nothing was changed")
+    if not isinstance(data, dict) or not isinstance(data.get("permissions", {}), dict) \
+            or not isinstance(data.get("permissions", {}).get("allow", []), list):
+        raise Fail(".claude/settings.json has an unexpected shape (permissions.allow must be a list); "
+                   "nothing was changed")
     changed = []
     text, added = add_missing_sections(proj.read_text(), (INIT_REFS / "project-template.md").read_text(),
                                        owner_line(root))
@@ -1060,8 +1149,6 @@ def cmd_upgrade(a):
         proj.write_text(text)
         changed.append(".agent-team/project.md")
         print(f"project.md: added sections {', '.join(added)}")
-    sp = root / ".claude" / "settings.json"
-    data = json.loads(sp.read_text()) if sp.exists() else {}
     allow = data.setdefault("permissions", {}).setdefault("allow", [])
     new = merged_allow(allow, text)
     if new:

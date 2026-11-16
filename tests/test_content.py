@@ -308,3 +308,11 @@ def test_team_build_review_fixes_wired():
     for k in ("agent-team next <slug> review", "agent-team next <slug> qa", "agent-team idea <slug> --show",
               "stop **without** the *Stop* steps", "CI fix broke the tests", "merge the agent-team/meta PR first"):
         assert k in text, k
+
+
+def test_ci_fix_is_reviewed():
+    assert "review of the CI fix" in read("skills/team-build/SKILL.md")
+
+
+def test_team_init_guards_owner_edits():
+    assert "must not sweep in their edits" in read("skills/team-init/SKILL.md")

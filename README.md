@@ -61,7 +61,7 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |
 | `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links and the tier/cost log |
 | `idea <slug> [--set …\|--show]` / `summary` | idea lifecycle and lookup; all-feature summary |
-| `cleanup <slug>` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work (`--force` to override) |
+| `cleanup <slug> [--remote]` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work, and `--remote` deletes the remote branch only if it was merged (`--force` to override) |
 | `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected |
 | `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
 

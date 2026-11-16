@@ -296,6 +296,7 @@ def test_summary_lists_features(repo, capsys):
 def test_cleanup_removes_worktree_and_branch(repo):
     wt, fd = new_feature(repo)
     assert at.main(["push", "tiny"]) == 0
+    sh("git", "merge", "-q", "--no-edit", "origin/feature/tiny", cwd=repo); sh("git", "push", "-q", cwd=repo)
     assert at.main(["cleanup", "tiny", "--remote"]) == 0
     assert not wt.exists()
     assert "feature/tiny" not in sh("git", "branch", "-a", cwd=repo)
@@ -325,6 +326,7 @@ def test_upgrade_v1_repo(repo, capsys):
     (repo / ".claude").mkdir()
     (repo / ".claude" / "settings.json").write_text(json.dumps(
         {"model": "mine", "permissions": {"allow": ["Edit", "Bash(npm test:*)"], "deny": ["Bash(rm:*)"]}}))
+    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "v1 setup", cwd=repo)   # as team-init v0.1 left it
     assert at.main(["upgrade"]) == 0
     text = (repo / ".agent-team" / "project.md").read_text()
     heads = [h for h in text.splitlines() if h.startswith("## ")]
@@ -338,6 +340,7 @@ def test_upgrade_v1_repo(repo, capsys):
     assert "Bash(agent-team:*)" in allow and "Bash(npm run build:*)" in allow
     assert allow.count("Bash(npm test:*)") == 1 and "{{TEST_COMMANDS}}" not in allow
     assert (repo / ".codex" / "config.toml").exists()
+    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "upgrade", cwd=repo)   # docs-commit's job
     capsys.readouterr()
     assert at.main(["upgrade"]) == 0                                       # idempotent
     assert "nothing — already up to date" in capsys.readouterr().out

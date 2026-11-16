@@ -136,7 +136,8 @@ def test_project_excludes_without_slash_match_anywhere(repo):
 @pytest.mark.parametrize("existing", ["/.agent-team/worktrees/", ".agent-team/worktrees", ".agent-team/worktrees/"])
 def test_upgrade_no_duplicate_gitignore(repo, existing):
     (repo / ".gitignore").write_text(existing + "\n")
-    at.main(["upgrade"])
+    sh("git", "commit", "-q", "--allow-empty", "-am", "ignore", cwd=repo)
+    assert at.main(["upgrade"]) == 0
     assert (repo / ".gitignore").read_text().count("worktrees") == 1
 
 
