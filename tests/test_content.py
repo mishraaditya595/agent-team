@@ -65,3 +65,16 @@ def test_pm_role_frontmatter():
     from validate import parse_frontmatter
     fm = parse_frontmatter(read("skills/pm/SKILL.md"))
     assert fm["metadata"]["tier"] == "deep" and fm["metadata"]["allowed-tiers"] == ["deep"]
+
+
+TASK_LINE = re.compile(r"- \[ \] T\d+ \[(fast|standard)\] .+ — files: .+ — maps to: AC\d+")
+
+
+def test_plan_template_task_format():
+    assert TASK_LINE.search(read("skills/tech-lead/references/plan-template.md"))
+
+
+def test_plan_template_has_test_plan_heading():
+    text = read("skills/tech-lead/references/plan-template.md")
+    for h in ("## Approach", "## Data flow", "## Edge cases", "## Test plan", "## Tasks"):
+        assert h in text, h
