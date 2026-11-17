@@ -26,6 +26,7 @@ Run the orchestrator in a **standard-tier session** (Sonnet, or Codex `--profile
   - `pr-open` — the PR is waiting for the owner's merge: `agent-team lease <slug> release` and say so; nothing else.
   - `merged` / `marketed` — nothing to build; point to `team-wrap <slug>` / `team-market <slug>`.
   - any other stage — continue from it.
+- **Drift check (resume at `implement`, or `stopped_at=implement`):** `agent-team drift <slug>`. `drift: none` → continue. Files listed → the default branch changed code the plan relies on: `agent-team sync <slug>` (exit 2 → *Stop*: "merge conflict with $D"; exit 1 → *Stop* with its message), then dispatch `tech-lead` in plan **refresh** mode with the drifted files, log it as `plan tech-lead refresh`, commit and push, then implement. Exit 1 because the plan has no `planned-at` (written before drift checks) → skip the check and continue; any other exit 1 → *Stop* with its message.
 
 ## 1. Workspace
 

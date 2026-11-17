@@ -51,9 +51,11 @@ Adapted from obra/superpowers `writing-plans` and `test-driven-development` (MIT
 6. **Write each task's block** under its line: files; **Interfaces** (what it uses from earlier tasks and what later tasks rely on — exact names and types); the **failing test** (name + what it asserts, with the spec's exact values); the **run** command and the **expected** result. A code snippet only when the signature and test don't determine the algorithm.
 7. **Test-first, always.** Every task starts with a test the developer writes, runs and must **watch it fail** for the right reason before writing code. A test that passes before the code exists is a broken test. Test real behaviour, not mocks. If the project has no tests, the first task sets up the project's standard framework.
 8. **Write `## Review focus`:** up to 5 inputs or failure modes the spec implies but no task's tests exercise yet, most likely to bite a real user first. For each, add a test to the task that owns that code. Empty means you checked and found none.
-9. **Fill the header and `## Security touchpoints` exactly** (`qa-ui: yes|no`, `none` or a list): the workflow reads them to pick the QA and Reviewer tiers.
+9. **Fill the header and `## Security touchpoints` exactly** (`qa-ui: yes|no`, `planned-at:` = `git rev-parse --short $(git merge-base HEAD origin/<default>)`, `none` or a list): the workflow reads them to pick the QA and Reviewer tiers and to check the plan for drift.
 10. **Say what not to do.** List tempting changes that are out of scope.
 11. **Run the self-review** in `references/plan-checklist.md` and fix what it finds inline.
+
+**Refresh** (the workflow found drift: files in `## Files` changed on the default branch since `planned-at`, and merged them into the branch). Read only the drifted files and the unticked tasks that touch them. Revise those tasks' blocks to fit the code as it is now — never ticked tasks, never the spec's scope. Set `planned-at` to the new merge-base, and append `- Refresh: <files> — <what changed in the plan, or "no change needed">` to `## Rulings`.
 
 Keep `plan.md` shorter than the code it describes: signatures, test names and assertions — not function bodies. A line that decides nothing ("handle edge cases", "add tests") is a gap; a full function body is a transcript. Both are wrong.
 

@@ -464,3 +464,12 @@ def test_audit_mode():
     wf = read("skills/team-audit/SKILL.md")
     assert "tech-lead-audit" in wf and ".agent-team/audits/" in wf and "mode: audit" in wf
     assert "team-audit" in read("README.md")
+
+
+def test_plan_drift_wiring():
+    assert "planned-at:" in read("skills/tech-lead/references/plan-template.md")
+    assert "planned-at" in read("skills/tech-lead/references/plan-checklist.md")
+    tl = read("skills/tech-lead/SKILL.md")
+    assert "Refresh" in tl and "merge-base" in tl
+    tb = read("skills/team-build/SKILL.md")
+    assert "agent-team drift" in tb and "refresh" in tb
