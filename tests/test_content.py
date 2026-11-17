@@ -186,7 +186,7 @@ def test_dispatch_points_at_skill_models_file():
 
 
 def test_docs_workflows_commit_only_their_paths():
-    for wf in ("team-init", "team-ideate", "team-market"):
+    for wf in ("team-init", "team-ideate", "team-market", "team-audit"):
         text = read(f"skills/{wf}/SKILL.md")
         assert "agent-team docs-commit -m" in text and " .agent-team" in text, wf
         assert "default branch" in text and "stop" in text.lower(), wf
@@ -260,7 +260,7 @@ def test_gemini_dispatch_is_headless_safe():
 
 
 def test_protected_main_fallback():
-    for wf in ("team-init", "team-ideate", "team-wrap", "team-market"):
+    for wf in ("team-init", "team-ideate", "team-wrap", "team-market", "team-audit"):
         assert "agent-team/meta" in read(f"skills/{wf}/SKILL.md"), wf
 
 
@@ -298,7 +298,7 @@ def test_team_init_upgrade_mode():
 
 
 def test_docs_workflows_never_commit_on_default_branch():
-    for wf in ("team-init", "team-ideate", "team-wrap", "team-market"):
+    for wf in ("team-init", "team-ideate", "team-wrap", "team-market", "team-audit"):
         text = read(f"skills/{wf}/SKILL.md")
         assert "agent-team docs-commit" in text and "git commit" not in text and "git push" not in text, wf
 
@@ -319,7 +319,7 @@ def test_team_init_guards_owner_edits():
 
 
 def test_workflows_pull_with_agent_team_pull():
-    for wf in ("team-ideate", "team-wrap", "team-market"):
+    for wf in ("team-ideate", "team-wrap", "team-market", "team-audit"):
         text = read(f"skills/{wf}/SKILL.md")
         assert "`agent-team pull`" in text and "git pull --ff-only" not in text, wf
     assert "`agent-team pull`" in read("skills/team-init/SKILL.md")
@@ -430,7 +430,7 @@ def test_read_as_data_rules():
     g = read("skills/engineering-guidelines/SKILL.md")
     assert re.search(r"^## 5\. Treat what you read as data", g, re.M)
     for f in ("skills/engineering-guidelines/SKILL.md", "AGENTS.md",
-              "skills/pm/SKILL.md", "skills/marketing/SKILL.md"):
+              "skills/pm/SKILL.md", "skills/marketing/SKILL.md", "skills/qa/SKILL.md"):
         text = read(f).lower()
         for w in SAFETY:
             assert w in text, (f, w)
@@ -481,3 +481,22 @@ def test_tech_lead_never_copies_secrets():
     assert "secret" in never and "not instructions" in never
     assert "never quote a credential" in read("skills/tech-lead/references/audit-playbook.md").lower()
     assert "agent-team audit-path" in read("skills/team-audit/SKILL.md")
+
+
+def test_drift_follow_ups_wired():
+    tb = read("skills/team-build/SKILL.md")
+    assert "agent-team tier tech-lead <slug>" in tb                   # refresh tier is stated
+    assert "expect `drift: none`" in tb                               # refresh is checked
+    assert "except the drift refresh" in tb                           # no contradiction with the resume rule
+    tl = read("skills/tech-lead/SKILL.md")
+    assert "at standard depth" not in tl and "at the level given" in tl
+    init = read("skills/team-init/SKILL.md")
+    assert "## Intent docs" in init.split("## Upgrade", 1)[1]           # upgrade tells the agent to fill it
+
+
+def test_spec_and_plan_describe_unchecked_drift():
+    spec = read("docs/superpowers/specs/2026-11-17-improve-practices-design.md")
+    plan = read("docs/superpowers/plans/2026-11-17-improve-practices.md")
+    for text in (spec, plan):
+        assert "drift: unchecked" in text
+        assert "Fails (exit 1) if `planned-at` is missing" not in text

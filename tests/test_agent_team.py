@@ -1,4 +1,5 @@
 """Behaviour of the agent-team helper CLI against throwaway git repos."""
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -440,3 +441,29 @@ def test_audit_path(repo, capsys):
     assert lines[0] == "path: .agent-team/audits/2026-11-17-3.md"
     assert "earlier: origin/agent-team/meta:.agent-team/audits/2026-11-17.md" in lines
     assert "earlier: .agent-team/audits/2026-11-17-2.md" in lines
+
+
+def test_drift_reads_every_path_on_a_line(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: {base}")
+                                + "\n## Files\n- `x.txt`, `app.txt` — modify — both\n* `y.txt` — star bullet\n")
+    (repo / "app.txt").write_text("changed\n")
+    sh("git", "commit", "-qam", "upstream", cwd=repo); sh("git", "push", "-q", cwd=repo)
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: app.txt"
+    assert at.plan_files("## Files\n* `y.txt` — x\n- `a.py`, `b.py` — y\n- `lib/*.py` — glob\n") == ["y.txt", "a.py", "b.py"]
+
+
+def test_audit_path_rejects_bad_date(repo, capsys):
+    assert at.main(["audit-path", "--date", "../x"]) == 1
+    assert "YYYY-MM-DD" in capsys.readouterr().err
+
+
+def test_upgrade_marks_intent_docs_unknown(repo, capsys):
+    pm = repo / ".agent-team" / "project.md"
+    pm.write_text(re.sub(r"^## Intent docs\n.*?(?=^## )", "", pm.read_text(), flags=re.M | re.S))
+    assert "## Intent docs" not in pm.read_text()
+    assert at.main(["upgrade"]) == 0
+    body = at.section_raw(pm.read_text(), "Intent docs")
+    assert "unknown — owner to fill" in body and "\nnone" not in body

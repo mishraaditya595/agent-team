@@ -30,7 +30,7 @@ Adds only what's missing; never rewrites what the owner wrote.
 1. Same checks as step 1, and the checkout must be on `$D` (else stop and tell the owner). `agent-team pull` (instead of `git pull`: it first puts back any doc copy `docs-pull` wrote that nobody edited, then pulls `--ff-only` and brings in docs still waiting on an `agent-team/meta` PR). If it fails, stop and show the owner its message.
 2. `agent-team upgrade`. It adds missing `project.md` sections (filling `## Owner` from git/gh), merges the current permission allow-list (with this project's install/build/test commands) into `.claude/settings.json`, creates `.codex/config.toml` if missing, and adds `.agent-team/worktrees/` to `.gitignore`. It prints what changed.
 3. If it printed `nothing — already up to date`, say so and stop.
-4. Fill any new section you can from cheap reads (as in step 3 above); leave voice, positioning and channels as `unknown — owner to fill`.
+4. Fill any new section you can from cheap reads (as in step 3 above); leave voice, positioning and channels as `unknown — owner to fill`. If `## Intent docs` was added, list the repo for ADRs (`docs/adr*/`, `docs/decisions/`), PRDs or specs, `PRODUCT.md`, `CONTEXT.md` and `DESIGN.md` and write their paths, or `none` if there really are none — older repos are where these usually exist.
 5. Commit only the paths it listed: `agent-team docs-commit -m "chore: upgrade agent-team setup" --title "agent-team: setup" <paths>` (see step 5 above).
 6. Tell the owner what was added, and which sections still say `unknown — owner to fill`.
 

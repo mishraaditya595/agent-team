@@ -19,11 +19,11 @@
 - Upstream ideas are rewritten in our own words; credit in `NOTICE`.
 - Test command for every task: `python3 -m pytest -q && python3 scripts/validate.py .` (163 tests pass at the start).
 - Audit appends at most **5** ideas; ideas heading `## <YYYY-MM-DD> — mode: audit`; report path `.agent-team/audits/<YYYY-MM-DD>.md`.
-- Drift output exactly `drift: none` or `drift: <file>, <file>`.
+- Drift output exactly `drift: none`, `drift: <file>, <file>` or `drift: unchecked (<reason>)`, always exit 0; exit 1 only for real errors (missing plan.md, failed fetch).
 
 ## Review Focus
 
-- A plan.md with no `planned-at:` line (all plans written before this change) → `agent-team drift` fails with a clear message, and team-build treats that as "no stamp, skip the check", never as a stop — test in Task 5, wording in Task 6.
+- A plan.md with no `planned-at:` line (all plans written before this change) → `agent-team drift` prints `drift: unchecked (…)` and exits 0, and team-build continues and logs it, never stops — test in Task 5, wording in Task 6.
 - `## Files` entries that aren't backticked or are globs → ignored, not crashed on — test in Task 5.
 - `tier tech-lead-audit` with no slug and no `features/` folder → works (it's repo-level, like `pm-ideate`) — test in Task 3.
 - Running `team-audit` twice on the same day → second report must not overwrite the first — Task 4 (`-2` suffix rule in the workflow).
@@ -159,8 +159,8 @@ def test_audit_mode():
 - Test: `tests/test_agent_team.py`
 
 **Interfaces:**
-- Produces: `planned_at(plan: str) -> str | None` (regex `planned-at:\s*([0-9a-f]{7,40})`), `plan_files(plan: str) -> list[str]` (backticked paths on `- ` lines of `## Files`, skipping any containing `*`), `cmd_drift(a)` registered as `drift <slug>`.
-- Behaviour: in `work_dir(slug)`, `git fetch -q origin <default>`, then `git diff --name-only <planned-at> origin/<default> -- <files>`; print `drift: none` or `drift: a, b`; `Fail("plan.md has no planned-at line")` when unstamped.
+- Produces: `planned_at(plan: str) -> str | None` (regex `planned-at:\s*([0-9a-f]{7,40})`), `plan_files(plan: str) -> list[str]` (every backticked path on `-`/`*` bullet lines of `## Files`, `:line` suffixes stripped, globs skipped), `cmd_drift(a)` registered as `drift <slug>`.
+- Behaviour: in `work_dir(slug)`, `git fetch -q origin <default>`, then `git diff --name-only <planned-at> origin/<default> -- <files>`; print `drift: none` or `drift: a, b`; print `drift: unchecked (<reason>)` and exit 0 when unstamped or when the sha isn't in the clone (`git cat-file -e <sha>^{commit}`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -177,8 +177,8 @@ def test_drift(repo, capsys):
     assert at.main(["drift", "tiny"]) == 0
     assert capsys.readouterr().out.strip() == "drift: app.txt"
     (fd / "plan.md").write_text(PLAN)
-    assert at.main(["drift", "tiny"]) == 1
-    assert "planned-at" in capsys.readouterr().err
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.startswith("drift: unchecked (no planned-at")
 ```
 
 - [ ] **Step 2:** `python3 -m pytest -q tests/test_agent_team.py::test_drift` → FAIL (unknown command).
@@ -192,7 +192,7 @@ def test_drift(repo, capsys):
 - Modify: `skills/tech-lead/references/plan-template.md` (header line gains `· planned-at: <short sha of git merge-base HEAD origin/<default>>`)
 - Modify: `skills/tech-lead/SKILL.md` (plan step 9 fills `planned-at`; new short **Refresh** subsection: revise only unticked tasks touching drifted files, new `planned-at`, `- Refresh: <files> — <what changed>` in `## Rulings`)
 - Modify: `skills/tech-lead/references/plan-checklist.md` (`planned-at` is filled)
-- Modify: `skills/team-build/SKILL.md` step 0 resume: stage `implement` (or `stopped_at=implement`) → `agent-team drift <slug>`; files listed → `agent-team sync <slug>` (exit handling as in step 5) → dispatch `tech-lead` plan refresh with the files → log `plan tech-lead refresh`; `drift` exit 1 (no stamp) → skip the check, note it in the log
+- Modify: `skills/team-build/SKILL.md` step 0 resume: stage `implement` (or `stopped_at=implement`) → `agent-team drift <slug>`; files listed → `agent-team sync <slug>` (exit handling as in step 5) → dispatch `tech-lead` plan refresh with the files → log `plan tech-lead refresh`; `drift: unchecked (…)` → skip the check, note it in the log; after a refresh, re-run `drift` and expect `drift: none`
 - Test: `tests/test_content.py`
 
 - [ ] **Step 1: Write the failing test**

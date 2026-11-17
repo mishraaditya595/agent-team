@@ -68,7 +68,7 @@ You find what's worth fixing or building next across the whole codebase — not 
    - `quick` — hotspots only (highest churn, critical paths); correctness, security, tests; keep the top ~6, HIGH confidence only.
    - `standard` (default) — hotspot-weighted across the main packages; all nine categories.
    - `deep` — every package, all nine categories; LOW-confidence findings kept, marked "investigate".
-   - A category name → only that category, at standard depth.
+   - A category name → only that category, at the level given (standard if none).
    Read-only: run only read-only checks (typecheck, lint in check mode, the dependency audit command, the test suite if it's cheap and writes nothing).
 3. **Vet** every finding by re-opening its cited lines yourself; record what you drop.
 4. **Rank** by leverage; write the report. Say under `## Not audited` what this level skipped.

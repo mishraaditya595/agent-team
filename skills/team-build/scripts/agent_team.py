@@ -430,12 +430,15 @@ def planned_at(plan):
 
 
 def plan_files(plan):
-    """Backticked paths on the '- ' lines of plan.md's ## Files; globs are skipped."""
+    """Every backticked path on the bullet ('-' or '*') lines of plan.md's ## Files; globs are skipped."""
     out = []
     for line in section(plan, "Files").splitlines():
-        m = re.match(r"\s*-\s*`([^`]+)`", line)
-        if m and "*" not in m.group(1):
-            out.append(m.group(1))
+        if not re.match(r"\s*[-*]\s", line):
+            continue
+        for p in re.findall(r"`([^`]+)`", line.split(" — ", 1)[0]):
+            p = re.sub(r":\d+(-\d+)?$", "", p.strip())
+            if p and "*" not in p and p not in out:
+                out.append(p)
     return out
 
 
@@ -759,6 +762,8 @@ def cmd_audit_path(a):
             if rel.endswith(".md") and rel not in taken:
                 taken.add(rel); earlier.append(f"{ref}:{rel}")
     date = a.date or now_utc().strftime("%Y-%m-%d")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise Fail(f"--date must be YYYY-MM-DD, got {date!r}")
     path, n = f"{rel_dir}/{date}.md", 1
     while path in taken:
         n += 1
@@ -1257,6 +1262,8 @@ def add_missing_sections(text, template, owner="unknown — owner to fill"):
         if h.lower() in have:
             continue
         body = owner if h.lower() == "owner" else section_raw(template, h)
+        if h.lower() == "intent docs":            # an older repo may well have ADRs/PRDs: ask, don't claim none
+            body = re.sub(r"^none$", "unknown — owner to fill", body, flags=re.M)
         if body.startswith("<") and not body.startswith("<!--"):
             body = "unknown — owner to fill"
         block = f"## {h}\n{body}\n\n"

@@ -59,8 +59,12 @@ shadcn/improve (MIT) uses the same split agent-team does: an expensive model jud
 
 ### 4. Plan drift
 - Plan header gains `planned-at: <short sha>` = `git merge-base HEAD origin/<default>` at planning time.
-- Helper `agent-team drift <slug>`: reads `planned-at` and the backticked paths in `## Files`, prints `drift: none` or `drift: <comma-separated files>` changed on `origin/<default>` since then. Fails (exit 1) if `planned-at` is missing or plan.md is absent.
-- `team-build` resume at `implement` (or `stopped_at=implement`): run `agent-team drift`; if anything drifted → `agent-team sync` (same exit handling as the review step), then dispatch `tech-lead` in **plan refresh**: revise only unticked tasks that touch drifted files, set `planned-at` to the new merge-base, record `- Refresh: <files> — <what changed in the plan>` under `## Rulings`. Then continue implementing.
+- Helper `agent-team drift <slug>`: reads `planned-at` (bare or backticked) and every backticked path on the bullet lines of `## Files`, and prints one of three results, all exit 0:
+  - `drift: none` — nothing in those files changed on `origin/<default>` since `planned-at`;
+  - `drift: <comma-separated files>` — those files changed;
+  - `drift: unchecked (<reason>)` — the plan has no `planned-at` (written before this change), or the commit isn't in this clone (shallow clone, rewritten history). An advisory check never stops a build for these.
+  Exit 1 only for real errors (plan.md missing, fetch failed).
+- `team-build` resume at `implement` (or `stopped_at=implement`): run `agent-team drift`; if anything drifted → `agent-team sync` (same exit handling as the review step), then dispatch `tech-lead` in **plan refresh**: revise only unticked tasks that touch drifted files, set `planned-at` to the new merge-base, record `- Refresh: <files> — <what changed in the plan>` under `## Rulings`. Re-run `agent-team drift` and expect `drift: none`, else stop. Then continue implementing. `drift: unchecked` → continue and log the reason.
 
 ### Credits
 `NOTICE` gains shadcn/improve (MIT). Plugin version → 0.3.0.
