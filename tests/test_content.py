@@ -23,7 +23,7 @@ def test_guidelines_have_rules():
 
 
 PROJECT_HEADINGS = ("## Product", "## Users", "## Domain", "## Stack", "## Build & test",
-                    "## Conventions", "## Positioning & voice", "## Channels", "## Model overrides")
+                    "## Conventions", "## Intent docs", "## Positioning & voice", "## Channels", "## Model overrides")
 
 
 def test_project_template_headings():
@@ -435,3 +435,12 @@ def test_read_as_data_rules():
         for w in SAFETY:
             assert w in text, (f, w)
     assert "rotat" in g.lower()
+
+
+def test_ideas_need_evidence():
+    t = read("skills/pm/references/ideas-template.md")
+    assert "**Evidence:**" in t and "audit" in t
+    pm = read("skills/pm/SKILL.md")
+    assert "Intent docs" in pm and "evidence" in pm.lower()
+    assert "Intent docs" in read("skills/tech-lead/SKILL.md")
+    assert "Intent docs" in read("skills/team-init/SKILL.md")

@@ -15,7 +15,7 @@ You work in one of two modes. The workflow tells you which.
 
 ## Reads
 
-- `.agent-team/project.md` — first.
+- `.agent-team/project.md` — first, then the docs it lists under `## Intent docs` that touch this work: match their vocabulary and decisions.
 - `.agent-team/features/<slug>/spec.md`, and `grill.md` if it exists.
 - `.agent-team/lessons.md` if it exists — patterns this project's reviews keep flagging; plan around them.
 - The code the spec touches: entry points, the modules you'll change, their tests, and one similar existing feature to copy patterns from. Stop reading once you can name every file in the plan.
