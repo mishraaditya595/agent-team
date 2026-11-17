@@ -43,8 +43,10 @@ GENERATED = ("*.g.dart", "*.freezed.dart", "*.mocks.dart", "*.gr.dart", "*.pb.go
              "*.min.css", "*.map")
 CHECKBOX = re.compile(r"^\s*- \[( |x|X)\]")
 TASK_LINE = re.compile(r"^\s*- \[( |x|X)\] (T\d+)\b(?:\s+\[([^\]]*)\])?", re.I)
-ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm", "marketing-topic": "marketing"}
-ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing", "marketing-topic")
+ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm", "marketing-topic": "marketing",
+              "tech-lead-audit": "tech-lead", "tech-lead-audit-quick": "tech-lead"}
+ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "tech-lead-audit", "tech-lead-audit-quick",
+         "developer", "reviewer", "qa", "marketing", "marketing-topic")
 
 
 class Fail(Exception):
@@ -427,6 +429,10 @@ def rule_tier(role, slug, task=None, escalate=False):
     base = work_dir(slug) if slug else repo_root()
     fd = feature_dir(base, slug) if slug else None
     read = lambda name: (fd / name).read_text() if fd and (fd / name).exists() else ""
+    if role == "tech-lead-audit":
+        return "deep", "audit"
+    if role == "tech-lead-audit-quick":
+        return "standard", "quick audit"
     if role == "pm-ideate":
         return "deep", "ideation"
     if role == "pm-intake":
@@ -669,7 +675,7 @@ def cmd_lease(a):
 
 def cmd_tier(a):
     tool = a.tool or os.environ.get("AGENT_TEAM_TOOL", "claude")
-    if not a.slug and a.role not in ("pm-ideate", "pm-intake", "marketing-topic"):
+    if not a.slug and a.role not in ("pm-ideate", "pm-intake", "marketing-topic", "tech-lead-audit", "tech-lead-audit-quick"):
         raise Fail(f"tier {a.role} needs the feature slug: agent-team tier {a.role} <slug>")
     r = pick(a.role, a.slug, tool, a.task, a.escalate)
     print(f"tier={r['tier']} model={r['model']} effort={r['effort']} reason={r['reason']}")

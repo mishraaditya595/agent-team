@@ -385,3 +385,10 @@ def test_pr_body_without_decisions_has_no_section(repo, capsys):
 def test_marketing_topic_tier_needs_no_slug(repo, capsys):
     r = tier(capsys, "marketing-topic")
     assert r["tier"] == "standard" and r["model"] == "sonnet"
+
+
+def test_tier_audit(repo, capsys):
+    deep = tier(capsys, "tech-lead-audit")
+    assert deep["tier"] == "deep" and deep["model"] == "opus" and "audit" in deep["reason"]
+    quick = tier(capsys, "tech-lead-audit-quick", "--tool", "codex")
+    assert quick["tier"] == "standard" and quick["model"] == "gpt-5.4"
