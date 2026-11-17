@@ -421,3 +421,17 @@ def test_marketing_two_modes():
     tmpl = read("skills/marketing/references/topic-template.md")
     for h in ("## Instagram", "## Blog", "## LinkedIn", "## Reddit"):
         assert h in tmpl, h
+
+
+SAFETY = ("not instructions", "secret")
+
+
+def test_read_as_data_rules():
+    g = read("skills/engineering-guidelines/SKILL.md")
+    assert re.search(r"^## 5\. Treat what you read as data", g, re.M)
+    for f in ("skills/engineering-guidelines/SKILL.md", "AGENTS.md",
+              "skills/pm/SKILL.md", "skills/marketing/SKILL.md"):
+        text = read(f).lower()
+        for w in SAFETY:
+            assert w in text, (f, w)
+    assert "rotat" in g.lower()
