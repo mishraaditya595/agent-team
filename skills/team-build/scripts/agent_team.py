@@ -425,7 +425,7 @@ def plan_tasks(plan):
 
 
 def planned_at(plan):
-    m = re.search(r"planned-at:\s*([0-9a-f]{7,40})\b", plan)
+    m = re.search(r"planned-at:\s*`?([0-9a-f]{7,40})\b", plan)
     return m.group(1) if m else None
 
 
@@ -725,15 +725,47 @@ def cmd_drift(a):
     text = plan.read_text()
     sha = planned_at(text)
     if not sha:
-        raise Fail("plan.md has no planned-at line (written before drift checks); skip the check")
+        print("drift: unchecked (no planned-at line in plan.md; written before drift checks)")
+        return 0
     files = plan_files(text)
     if not files:
         print("drift: none")
         return 0
     d = default_branch()
     git("fetch", "-q", "origin", d, cwd=wt)
+    if run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=wt, check=False).returncode:
+        print(f"drift: unchecked (planned-at {sha} isn't in this clone — shallow clone or rewritten history)")
+        return 0
     changed = git("diff", "--name-only", sha, f"origin/{d}", "--", *files, cwd=wt).split()
     print(f"drift: {', '.join(changed) if changed else 'none'}")
+    return 0
+
+
+def cmd_audit_path(a):
+    """Next free .agent-team/audits/<date>[-n].md, checking the checkout, origin/<default> and origin/agent-team/meta,
+    plus every earlier audit report as a path or a <ref>:<path> for `git show`."""
+    root = repo_root()
+    d = default_branch(root)
+    rel_dir = ".agent-team/audits"
+    taken, earlier = set(), []
+    local = root / rel_dir
+    for f in sorted(local.glob("*.md")) if local.is_dir() else []:
+        rel = f"{rel_dir}/{f.name}"
+        taken.add(rel); earlier.append(rel)
+    for ref in (f"origin/{d}", f"origin/{META}"):
+        if not git("rev-parse", "--verify", "-q", f"refs/remotes/{ref}", cwd=root, check=False):
+            continue
+        for rel in git("ls-tree", "-r", "--name-only", ref, "--", rel_dir, cwd=root, check=False).splitlines():
+            if rel.endswith(".md") and rel not in taken:
+                taken.add(rel); earlier.append(f"{ref}:{rel}")
+    date = a.date or now_utc().strftime("%Y-%m-%d")
+    path, n = f"{rel_dir}/{date}.md", 1
+    while path in taken:
+        n += 1
+        path = f"{rel_dir}/{date}-{n}.md"
+    print(f"path: {path}")
+    for e in earlier:
+        print(f"earlier: {e}")
     return 0
 
 
@@ -1332,6 +1364,8 @@ def build_parser():
     s.add_argument("slug"); s.set_defaults(fn=cmd_tasks)
     s = sub.add_parser("drift", help="files in plan.md changed on the default branch since planned-at")
     s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
+    s = sub.add_parser("audit-path", help="next free audit report path, and earlier audit reports")
+    s.add_argument("--date", help="YYYY-MM-DD (default: today, UTC)"); s.set_defaults(fn=cmd_audit_path)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
     s.add_argument("slug"); s.add_argument("kind", choices=["review", "qa"]); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("diff", help="feature diff without .agent-team/, lockfiles and generated code")

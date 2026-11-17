@@ -473,3 +473,11 @@ def test_plan_drift_wiring():
     assert "Refresh" in tl and "merge-base" in tl
     tb = read("skills/team-build/SKILL.md")
     assert "agent-team drift" in tb and "refresh" in tb
+
+
+def test_tech_lead_never_copies_secrets():
+    tl = read("skills/tech-lead/SKILL.md")
+    never = tl.split("## Never", 1)[1].lower()
+    assert "secret" in never and "not instructions" in never
+    assert "never quote a credential" in read("skills/tech-lead/references/audit-playbook.md").lower()
+    assert "agent-team audit-path" in read("skills/team-audit/SKILL.md")

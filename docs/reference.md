@@ -45,6 +45,8 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `diff <slug> [--since SHA]` | the review diff without `.agent-team/`, lockfiles and generated code (`*.g.dart`, `*.freezed.dart`, …) |
 | `test <slug> [--build]` | runs the project's tests in the worktree; caches the result per code commit |
 | `sync <slug>` | merges the default branch in; reports conflicts |
+| `drift <slug>` | files in `plan.md`'s `## Files` changed on the default branch since the plan's `planned-at`; `unchecked` when the plan has no usable stamp |
+| `audit-path` | the next free `.agent-team/audits/<date>.md` name (checking here, the default branch and `agent-team/meta`) and the earlier reports |
 | `push <slug>` / `lease <slug>` | push with a clear message on rejection (never forced); a lease that's committed and pushed, so only one machine runs a feature |
 | `next <slug> review\|qa` | the next review/QA file number — continues across stops, so earlier reports are never overwritten |
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |

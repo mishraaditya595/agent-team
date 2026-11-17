@@ -406,5 +406,37 @@ def test_drift(repo, capsys):
     assert at.main(["drift", "tiny"]) == 0
     assert capsys.readouterr().out.strip() == "drift: app.txt"
     (fd / "plan.md").write_text(PLAN)
-    assert at.main(["drift", "tiny"]) == 1
-    assert "planned-at" in capsys.readouterr().err
+    assert at.main(["drift", "tiny"]) == 0                       # unstamped: skip, never stop
+    assert capsys.readouterr().out.startswith("drift: unchecked (no planned-at")
+
+
+def test_drift_backticked_and_unknown_sha(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    files = "\n## Files\n- `app.txt` — modify — x\nplain line, no backticks\n"
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: `{base}`") + files)
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: none"
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", "qa-ui: no · planned-at: deadbee") + files)
+    assert at.main(["drift", "tiny"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("drift: unchecked (") and "deadbee" in out
+
+
+def test_audit_path(repo, capsys):
+    capsys.readouterr()
+    assert at.main(["audit-path", "--date", "2026-11-17"]) == 0
+    assert capsys.readouterr().out.strip() == "path: .agent-team/audits/2026-11-17.md"
+    sh("git", "checkout", "-q", "-b", "agent-team/meta", cwd=repo)
+    (repo / ".agent-team" / "audits").mkdir()
+    (repo / ".agent-team" / "audits" / "2026-11-17.md").write_text("# Audit\n")
+    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "audit", cwd=repo)
+    sh("git", "push", "-q", "origin", "agent-team/meta", cwd=repo)
+    sh("git", "checkout", "-q", "main", cwd=repo)
+    (repo / ".agent-team" / "audits").mkdir()
+    (repo / ".agent-team" / "audits" / "2026-11-17-2.md").write_text("local\n")
+    assert at.main(["audit-path", "--date", "2026-11-17"]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "path: .agent-team/audits/2026-11-17-3.md"
+    assert "earlier: origin/agent-team/meta:.agent-team/audits/2026-11-17.md" in lines
+    assert "earlier: .agent-team/audits/2026-11-17-2.md" in lines

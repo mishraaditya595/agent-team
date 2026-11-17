@@ -79,7 +79,7 @@ Direction findings stay out of the ranked table (see the report template) and be
 
 ```
 ### A<n> [<category>] <short imperative title>
-- Evidence: `path:line` — what's there (2–5 strongest locations; "and ~N similar" if widespread)
+- Evidence: `path:line` — what's there, described not quoted when it holds data (2–5 strongest locations; "and ~N similar" if widespread). Never quote a credential — name its type.
 - Impact: what goes wrong or what it costs, concretely
 - Effort: S (hours) | M (about a day) | L (days) — for the fix, tests included
 - Risk: LOW|MED|HIGH — what the fix could break
