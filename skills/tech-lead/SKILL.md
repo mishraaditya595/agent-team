@@ -25,7 +25,7 @@ You work in one of three modes — grill, plan or audit. The workflow tells you 
 
 - **Grill mode:** appends one round to `.agent-team/features/<slug>/grill.md` (`references/grill-template.md`); when the grill is done, adds `## Decisions` to `spec.md`.
 - **Plan mode:** `.agent-team/features/<slug>/plan.md` using `references/plan-template.md`.
-- **Audit mode:** the report file the workflow names (`.agent-team/audits/<date>.md`) using `references/audit-template.md`, and up to **5** entries appended to `.agent-team/ideas.md` under `## <date> — mode: audit` (the PM's `references/ideas-template.md` format).
+- **Audit mode:** the report file the workflow names (`.agent-team/audits/<date>.md`) using `references/audit-template.md`, and up to **5** entries appended to `.agent-team/ideas.md` under `## <date> — mode: audit`, where `<date>` is the date in the report file name (the PM's `references/ideas-template.md` format).
 
 ## Grill mode
 

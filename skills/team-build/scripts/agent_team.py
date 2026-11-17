@@ -732,7 +732,7 @@ def cmd_drift(a):
         return 0
     files = plan_files(text)
     if not files:
-        print("drift: none")
+        print("drift: unchecked (no paths in ## Files to watch)")
         return 0
     d = default_branch()
     git("fetch", "-q", "origin", d, cwd=wt)

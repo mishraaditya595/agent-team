@@ -467,3 +467,14 @@ def test_upgrade_marks_intent_docs_unknown(repo, capsys):
     assert at.main(["upgrade"]) == 0
     body = at.section_raw(pm.read_text(), "Intent docs")
     assert "unknown — owner to fill" in body and "\nnone" not in body
+
+
+def test_drift_without_plan_or_files(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: {base}"))
+    assert at.main(["drift", "tiny"]) == 0              # stamped, but nothing to watch: say so, don't claim "none"
+    assert capsys.readouterr().out.startswith("drift: unchecked (no paths in ## Files")
+    (fd / "plan.md").unlink()
+    assert at.main(["drift", "tiny"]) == 1
+    assert "plan.md is missing" in capsys.readouterr().err

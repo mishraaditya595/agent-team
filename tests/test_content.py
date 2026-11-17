@@ -500,3 +500,10 @@ def test_spec_and_plan_describe_unchecked_drift():
     for text in (spec, plan):
         assert "drift: unchecked" in text
         assert "Fails (exit 1) if `planned-at` is missing" not in text
+
+
+def test_audit_date_comes_from_report_name():
+    wf = read("skills/team-audit/SKILL.md")
+    assert "today's date" not in wf and "date in the report file name" in wf
+    assert "date in the report file name" in read("skills/tech-lead/SKILL.md")
+    assert "team-audit [quick\\|deep] [<category>]" in read("README.md")
