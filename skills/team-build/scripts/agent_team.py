@@ -424,6 +424,21 @@ def plan_tasks(plan):
     return out
 
 
+def planned_at(plan):
+    m = re.search(r"planned-at:\s*([0-9a-f]{7,40})\b", plan)
+    return m.group(1) if m else None
+
+
+def plan_files(plan):
+    """Backticked paths on the '- ' lines of plan.md's ## Files; globs are skipped."""
+    out = []
+    for line in section(plan, "Files").splitlines():
+        m = re.match(r"\s*-\s*`([^`]+)`", line)
+        if m and "*" not in m.group(1):
+            out.append(m.group(1))
+    return out
+
+
 def rule_tier(role, slug, task=None, escalate=False):
     """The tier rules from the team-build skill. Returns (tier, reason)."""
     base = work_dir(slug) if slug else repo_root()
@@ -700,6 +715,26 @@ def cmd_tasks(a):
         print("all tasks done")
     for tier, ids in todo:
         print(f"{tier} {','.join(ids)}")
+
+
+def cmd_drift(a):
+    wt = work_dir(a.slug)
+    plan = feature_dir(wt, a.slug) / "plan.md"
+    if not plan.exists():
+        raise Fail(f"{plan} is missing")
+    text = plan.read_text()
+    sha = planned_at(text)
+    if not sha:
+        raise Fail("plan.md has no planned-at line (written before drift checks); skip the check")
+    files = plan_files(text)
+    if not files:
+        print("drift: none")
+        return 0
+    d = default_branch()
+    git("fetch", "-q", "origin", d, cwd=wt)
+    changed = git("diff", "--name-only", sha, f"origin/{d}", "--", *files, cwd=wt).split()
+    print(f"drift: {', '.join(changed) if changed else 'none'}")
+    return 0
 
 
 def cmd_next(a):
@@ -1295,6 +1330,8 @@ def build_parser():
     s.add_argument("--tool", choices=["claude", "codex", "gemini", "other"]); s.set_defaults(fn=cmd_tier)
     s = sub.add_parser("tasks", help="unticked plan tasks, batched by tier")
     s.add_argument("slug"); s.set_defaults(fn=cmd_tasks)
+    s = sub.add_parser("drift", help="files in plan.md changed on the default branch since planned-at")
+    s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
     s.add_argument("slug"); s.add_argument("kind", choices=["review", "qa"]); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("diff", help="feature diff without .agent-team/, lockfiles and generated code")

@@ -392,3 +392,19 @@ def test_tier_audit(repo, capsys):
     assert deep["tier"] == "deep" and deep["model"] == "opus" and "audit" in deep["reason"]
     quick = tier(capsys, "tech-lead-audit-quick", "--tool", "codex")
     assert quick["tier"] == "standard" and quick["model"] == "gpt-5.4"
+
+
+def test_drift(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: {base}")
+                                + "\n## Files\n- `app.txt` — modify — x\n- `lib/*.py` — create — glob\n")
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: none"
+    (repo / "app.txt").write_text("changed\n")
+    sh("git", "commit", "-qam", "upstream", cwd=repo); sh("git", "push", "-q", cwd=repo)
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: app.txt"
+    (fd / "plan.md").write_text(PLAN)
+    assert at.main(["drift", "tiny"]) == 1
+    assert "planned-at" in capsys.readouterr().err
