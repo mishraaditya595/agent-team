@@ -26,6 +26,10 @@
 ## Conventions
 <Code style, branching, commit style, folders to never touch.>
 
+## Intent docs
+<!-- Paths of docs that record decisions and direction: ADRs (docs/adr/, docs/decisions/), PRDs or specs, PRODUCT.md, CONTEXT.md, DESIGN.md. Roles read these before proposing or flagging anything; a decision recorded here is settled. -->
+none
+
 ## Positioning & voice
 <One-line positioning. Tone of voice in 3 adjectives. Words to use / avoid.>
 

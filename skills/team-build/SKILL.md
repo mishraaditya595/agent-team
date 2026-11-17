@@ -26,6 +26,7 @@ Run the orchestrator in a **standard-tier session** (Sonnet, or Codex `--profile
   - `pr-open` — the PR is waiting for the owner's merge: `agent-team lease <slug> release` and say so; nothing else.
   - `merged` / `marketed` — nothing to build; point to `team-wrap <slug>` / `team-market <slug>`.
   - any other stage — continue from it.
+- **Drift check (resume at `implement`, or `stopped_at=implement`):** `agent-team drift <slug>`. `drift: none` → continue. `drift: unchecked (…)` (no stamp, no paths in `## Files`, or the stamp isn't in this clone) → continue, and put the reason in the next `agent-team log` note. Files listed → the default branch changed code the plan relies on: `agent-team sync <slug>` (exit 2 → *Stop*: "merge conflict with $D"; exit 1 → *Stop* with its message), then dispatch `tech-lead` in plan **refresh** mode (tier from `agent-team tier tech-lead <slug>`) with the drifted files, log it as `plan tech-lead refresh`, commit and push. Re-run `agent-team drift <slug>` and expect `drift: none`; anything else → *Stop*: "plan refresh didn't update planned-at" (otherwise every later resume pays for another refresh). Then implement. Exit 1 → *Stop* with its message.
 
 ## 1. Workspace
 
@@ -76,7 +77,7 @@ After every stage, in this order: set the next `stage` and `agent-team log <slug
 ## Keep it cheap
 
 - Hand each role only its inputs (see each role's `## Reads`), as paths — never pasted file contents.
-- Don't re-run the PM or Tech Lead when resuming past their stages; a resumed grill continues from the last round in `grill.md`.
+- Don't re-run the PM or Tech Lead when resuming past their stages (except the drift refresh in step 0); a resumed grill continues from the last round in `grill.md`.
 - Reviewer and QA use `agent-team test`, which reuses the cached result while the code commit hasn't changed, and `agent-team diff`, which leaves out `.agent-team/`, lockfiles and generated code.
 
 ## Never

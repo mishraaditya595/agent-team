@@ -18,6 +18,7 @@ Adapted from gstack's eng-manager plan review (garrytan/gstack, MIT) and the obr
 - Failure modes: network down, empty data, bad input, permission denied — each has a behaviour or is out of scope.
 - Data migrations: none, or a migration task with a rollback note.
 - `## Security touchpoints` (auth, payments, personal data, secrets, migrations): listed, or exactly `none`. Any listed → the review runs on the `deep` tier.
+- `planned-at:` in the header is the short merge-base of the branch with `origin/<default>` (the commit the plan was written against).
 - `qa-ui:` in the header is `yes` only if some AC can only be checked through the UI.
 - YAGNI ladder applied; any new dependency has a reason.
 - The test command is exact, runnable from the repo root, and matches `project.md` `## Build & test`.

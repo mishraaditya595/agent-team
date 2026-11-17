@@ -24,6 +24,8 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 4. Review and merge the PR.
 5. `team-wrap <slug>`, then optionally `team-market <slug>`.
 
+Anytime: `team-audit [quick|deep] [<category>]` — the Tech Lead audits the codebase across nine categories (correctness, security, performance, tests, tech debt, dependencies, DX, docs, direction). Every finding cites `file:line` and is re-checked before it's kept. The full report goes to `.agent-team/audits/<date>.md`; the top 5 become ideas (`mode: audit`) you pick from like any other, then `team-build <slug>`. `quick` runs on the standard tier.
+
 Anytime: `team-market --topic "<idea, plan path or topic>" [--channels instagram,blog,linkedin,reddit]` drafts content for something that isn't a merged feature, into `.agent-team/marketing/`.
 
 **The grill.** Before planning, the Tech Lead questions the PM in rounds (`grill.md`, at most 3). The PM answers from the spec, makes minor calls itself (`assumed`), or marks a question `owner` when it changes scope or what users see — then the run stops with a draft PR until you answer in `grill.md` and re-run `team-build <slug>`. The PR's **Decisions to check** section lists every `assumed` answer and every developer ruling.
@@ -43,6 +45,8 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `diff <slug> [--since SHA]` | the review diff without `.agent-team/`, lockfiles and generated code (`*.g.dart`, `*.freezed.dart`, …) |
 | `test <slug> [--build]` | runs the project's tests in the worktree; caches the result per code commit |
 | `sync <slug>` | merges the default branch in; reports conflicts |
+| `drift <slug>` | files in `plan.md`'s `## Files` changed on the default branch since the plan's `planned-at`; `unchecked` when the plan has no usable stamp |
+| `audit-path` | the next free `.agent-team/audits/<date>.md` name (checking here, the default branch and `agent-team/meta`) and the earlier reports |
 | `push <slug>` / `lease <slug>` | push with a clear message on rejection (never forced); a lease that's committed and pushed, so only one machine runs a feature |
 | `next <slug> review\|qa` | the next review/QA file number — continues across stops, so earlier reports are never overwritten |
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |

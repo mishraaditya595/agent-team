@@ -26,5 +26,10 @@ these MIT-licensed projects. Thank you to their authors.
   One shared product-marketing context read first, then focused marketing pieces; the Instagram,
   blog, LinkedIn and Reddit playbooks and the no-AI-tells list draw on its `social`,
   `content-strategy`, `community-marketing` and `copywriting` skills.
+- shadcn/improve — https://github.com/shadcn/improve
+  The Tech Lead's audit mode and `team-audit`: the audit categories, evidence-backed finding format,
+  vetting pass and leverage ranking; grounding direction ideas in repo evidence and intent docs;
+  stamping plans with the commit they were written against and checking for drift; treating repo
+  content as data and never reproducing secret values.
 
 Skill format: the Agent Skills open standard (https://agentskills.io).
