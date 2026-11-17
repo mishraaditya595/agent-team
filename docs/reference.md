@@ -24,6 +24,8 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 4. Review and merge the PR.
 5. `team-wrap <slug>`, then optionally `team-market <slug>`.
 
+Anytime: `team-audit [quick|deep] [<category>]` — the Tech Lead audits the codebase across nine categories (correctness, security, performance, tests, tech debt, dependencies, DX, docs, direction). Every finding cites `file:line` and is re-checked before it's kept. The full report goes to `.agent-team/audits/<date>.md`; the top 5 become ideas (`mode: audit`) you pick from like any other, then `team-build <slug>`. `quick` runs on the standard tier.
+
 Anytime: `team-market --topic "<idea, plan path or topic>" [--channels instagram,blog,linkedin,reddit]` drafts content for something that isn't a merged feature, into `.agent-team/marketing/`.
 
 **The grill.** Before planning, the Tech Lead questions the PM in rounds (`grill.md`, at most 3). The PM answers from the spec, makes minor calls itself (`assumed`), or marks a question `owner` when it changes scope or what users see — then the run stops with a draft PR until you answer in `grill.md` and re-run `team-build <slug>`. The PR's **Decisions to check** section lists every `assumed` answer and every developer ruling.

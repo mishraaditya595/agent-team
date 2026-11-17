@@ -70,6 +70,7 @@ Review the pull request it opens and merge it. Done. 🎉
 |---|---|
 | `team-init` | One-time setup for a product repo |
 | `team-ideate` | Get feature ideas, or add/reject your own |
+| `team-audit [quick\|deep]` | Tech Lead audits the code (bugs, security, tests, debt, direction) and adds the best fixes as ideas |
 | `team-build <name>` | Spec → grill → plan → code → review → QA → PR |
 | `team-status` | See every feature's stage and cost |
 | `team-wrap <name>` | After merging: close it out and save lessons |

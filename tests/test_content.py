@@ -444,3 +444,23 @@ def test_ideas_need_evidence():
     assert "Intent docs" in pm and "evidence" in pm.lower()
     assert "Intent docs" in read("skills/tech-lead/SKILL.md")
     assert "Intent docs" in read("skills/team-init/SKILL.md")
+
+
+CATEGORIES = ("Correctness", "Security", "Performance", "Tests", "Tech debt",
+              "Dependencies", "DX", "Docs", "Direction")
+
+
+def test_audit_mode():
+    pb = read("skills/tech-lead/references/audit-playbook.md")
+    for c in CATEGORIES:
+        assert re.search(rf"^## .*{c}", pb, re.M), c
+    for h in ("## Finding format", "## Ranking", "## Vetting"):
+        assert h in pb
+    tpl = read("skills/tech-lead/references/audit-template.md")
+    for h in ("## Not audited", "## Direction", "## Sent to ideas", "## Considered and rejected"):
+        assert h in tpl
+    tl = read("skills/tech-lead/SKILL.md")
+    assert "Audit mode" in tl and "references/audit-playbook.md" in tl
+    wf = read("skills/team-audit/SKILL.md")
+    assert "tech-lead-audit" in wf and ".agent-team/audits/" in wf and "mode: audit" in wf
+    assert "team-audit" in read("README.md")
