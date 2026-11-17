@@ -158,7 +158,7 @@ def test_notice_credits_sources():
     text = read("NOTICE")
     for repo in ("obra/superpowers", "garrytan/gstack", "bmad-code-org/BMAD-METHOD",
                  "multica-ai/andrej-karpathy-skills", "DietrichGebert/ponytail",
-                 "coreyhaines31/marketingskills"):
+                 "coreyhaines31/marketingskills", "shadcn/improve"):
         assert repo in text, repo
 
 
