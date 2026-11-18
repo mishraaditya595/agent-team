@@ -70,3 +70,41 @@ def test_pr_only_other_list_styles_still_apply():
         assert at.docs_pr_only(base.format(line)), line
     assert not at.docs_pr_only(base.format("- docs-push: direct"))
     assert not at.docs_pr_only(base.format("- no docs-push here, pr-only reviews are a team habit"))
+
+
+def gh_stub(tmp_path, monkeypatch, open_pr_url=""):
+    """gh stub for the meta PR: `pr list` reports open_pr_url (or none); `pr create` logs and prints a URL."""
+    import os
+    bin_ = tmp_path / "fakebin"; bin_.mkdir(exist_ok=True)
+    log = tmp_path / "gh.log"
+    (bin_ / "gh").write_text(f'''#!/usr/bin/env python3
+import sys
+a = sys.argv[1:]
+open("{log}", "a").write(" ".join(a) + "\\n")
+if a[:2] == ["pr", "create"]:
+    print("https://github.com/o/r/pull/9")
+elif a[:2] == ["pr", "list"]:
+    url = "{open_pr_url}"
+    print(url if "url" in a else ("1" if url else "0"))
+''')
+    (bin_ / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+    return log
+
+
+def test_pr_only_opens_meta_pr(repo, tmp_path, monkeypatch, capsys):
+    set_conventions(repo, "- docs-push: pr-only")
+    log = gh_stub(tmp_path, monkeypatch)
+    add_idea(repo)
+    assert at.main(["docs-commit", "-m", "ideas", "--title", "agent-team: ideas", ".agent-team/ideas.md"]) == 0
+    assert "PR: https://github.com/o/r/pull/9" in capsys.readouterr().out
+    assert "pr create --base main --head agent-team/meta --title agent-team: ideas" in log.read_text()
+
+
+def test_pr_only_reuses_open_meta_pr(repo, tmp_path, monkeypatch, capsys):
+    set_conventions(repo, "- docs-push: pr-only")
+    log = gh_stub(tmp_path, monkeypatch, open_pr_url="https://github.com/o/r/pull/5")
+    add_idea(repo)
+    assert at.main(["docs-commit", "-m", "ideas", ".agent-team/ideas.md"]) == 0
+    assert "PR: https://github.com/o/r/pull/5" in capsys.readouterr().out
+    assert "pr create" not in log.read_text()
