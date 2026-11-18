@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "skills" / "team-build" / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
 import agent_team as at  # noqa: E402
-from test_agent_team import sh  # noqa: E402
+from test_agent_team import repo, sh  # noqa: E402,F401
 
 WS_PROJECT = """# WS — project context
 
@@ -104,3 +104,30 @@ def test_repos_cli_fails_on_missing_repo(ws, capsys):
     import shutil; shutil.rmtree(ws / "app-flutter")
     assert at.main(["repos"]) == 1
     assert "app-flutter" in capsys.readouterr().err
+
+
+def test_upgrade_adds_repos_when_nested(ws, capsys):
+    p = ws / ".agent-team" / "project.md"
+    p.write_text(p.read_text().split("## Repos")[0] + "## Model overrides\nnone\n")
+    sh("git", "commit", "-qam", "drop repos", cwd=ws)
+    assert at.main(["upgrade"]) == 0
+    text = p.read_text()
+    assert "### app-backend\n" in text and "### app-flutter\n" in text
+    assert "- Order: app-backend, app-flutter" in text
+    assert text.index("## Repos") < text.index("## Model overrides")
+    assert "Repos, Cross-repo rules\n" in capsys.readouterr().out
+
+
+def test_upgrade_single_repo_never_adds_repos(repo, capsys):
+    at.main(["upgrade"])
+    assert "## Repos" not in (repo / ".agent-team" / "project.md").read_text()
+
+
+def test_unignored_nested_repo_not_detected(ws):
+    (ws / ".gitignore").write_text(".agent-team/worktrees/\n/app-backend/\n")
+    assert at.nested_repos(ws) == ["app-backend"]
+
+
+def test_allow_list_covers_repo_commands():
+    allow = at.merged_allow([], WS_PROJECT)
+    assert "Bash(test -f api.txt:*)" in allow and "Bash(test -f ui.txt:*)" in allow

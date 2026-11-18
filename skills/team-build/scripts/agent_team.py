@@ -1334,10 +1334,25 @@ def section_raw(text, heading):
     return m.group(1).strip() if m else ""
 
 
+def nested_repos(root):
+    """Sorted top-level dirs of root that are their own git repos and gitignored by root (a workspace)."""
+    def own_repo(d):
+        top = git("rev-parse", "--show-toplevel", cwd=d, check=False)
+        return bool(top) and Path(top).resolve() == d.resolve()
+    return sorted(d.name for d in root.iterdir() if d.is_dir() and own_repo(d)
+                  and run(["git", "check-ignore", "-q", d.name + "/"], cwd=root, check=False).returncode == 0)
+
+
+def draft_repos_sections(paths):
+    return ("## Repos\n" + "".join(f"### {p}\n- Role: unknown — owner to fill\n- Test: `none`\n" for p in paths)
+            + "\n## Cross-repo rules\n- Order: " + ", ".join(paths) + "\n- unknown — owner to fill\n")
+
+
 def merged_allow(existing, project_text):
     """Template allow-list entries (with the project's commands filled in) missing from existing."""
     tpl = json.loads((INIT_REFS / "claude-settings.json").read_text())["permissions"]["allow"]
     cmds = [project_command(n, project_text) for n in ("Install", "Build", "Test")]
+    cmds += [block_command(n, r["body"]) for r in repos(project_text) for n in ("Install", "Build", "Test")]
     entries = []
     for e in tpl:
         entries += [f"Bash({c}:*)" for c in cmds if c] if e == "{{TEST_COMMANDS}}" else [e]
@@ -1368,6 +1383,12 @@ def cmd_upgrade(a):
     changed = []
     text, added = add_missing_sections(proj.read_text(), (INIT_REFS / "project-template.md").read_text(),
                                        owner_line(root))
+    nested = nested_repos(root)
+    if nested and not repos(text):
+        m = re.search(r"^##\s+Model overrides\s*$", text, re.M | re.I)
+        block = draft_repos_sections(nested)
+        text = text[:m.start()] + block + "\n" + text[m.start():] if m else text.rstrip("\n") + "\n\n" + block
+        added += ["Repos", "Cross-repo rules"]
     if added:
         proj.write_text(text)
         changed.append(".agent-team/project.md")
