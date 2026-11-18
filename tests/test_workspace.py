@@ -215,7 +215,16 @@ def test_commit_refuses_workspace_path(ws, capsys):
     (wt / "app-backend/a.txt").write_text("a"); (wt / "notes.md").write_text("n")
     assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "notes.md"]) == 1
     assert "notes.md is not inside a product repo" in capsys.readouterr().err
-    assert "a.txt" in sh("git", "status", "--porcelain", cwd=wt / "app-backend")   # nothing committed
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-backend").startswith("??")   # nothing staged or committed
+
+
+def test_commit_is_atomic_across_repos(ws, capsys):
+    wt = new_ws_feature(ws)
+    before = sh("git", "rev-parse", "HEAD", cwd=wt / "app-backend")
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "app-flutter/typo.txt"]) == 1
+    assert "app-flutter:" in capsys.readouterr().err
+    assert sh("git", "rev-parse", "HEAD", cwd=wt / "app-backend") == before
 
 
 def test_heads_lists_each_repo(ws, capsys):

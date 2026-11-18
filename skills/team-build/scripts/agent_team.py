@@ -999,11 +999,15 @@ def cmd_commit(a):
         if not r:
             raise Fail(f"{p} is not inside a product repo of {a.slug}")
         by.setdefault(r["path"], []).append(p[len(r["path"]) + 1:])
-    for r in rs:
-        if r["path"] in by:
+    touched = [r for r in rs if r["path"] in by]
+    try:
+        for r in touched:       # stage everywhere first: a bad path fails before anything is committed
             git("add", "--", *by[r["path"]], cwd=r["wt"])
+        for r in touched:
             git("commit", "-q", "-m", a.message, cwd=r["wt"])
             print(f"committed {r['path']} {git('rev-parse', '--short', 'HEAD', cwd=r['wt'])}")
+    except Fail as e:
+        raise Fail(f"{r['path']}: {e}", code=e.code)
 
 
 def cmd_heads(a):
