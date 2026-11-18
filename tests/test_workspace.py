@@ -260,3 +260,30 @@ def test_push_and_sync_cover_products(ws, tmp_path, capsys):
 def test_parse_since():
     assert at.parse_since("a:x b:y") == {"a": "x", "b": "y"}
     assert at.parse_since("abc123") == "abc123" and at.parse_since(None) is None
+
+
+def test_diff_prefixes_repo_paths(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a\n"); at.main(["commit", "both", "-m", "a", "app-backend/a.txt"])
+    capsys.readouterr(); at.main(["diff", "both"])
+    assert "b/app-backend/a.txt" in capsys.readouterr().out
+    assert at.diffstat("both") == (1, 1)
+
+
+def test_diff_since_per_repo(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a\n"); at.main(["commit", "both", "-m", "a", "app-backend/a.txt"])
+    capsys.readouterr(); at.main(["heads", "both"]); since = capsys.readouterr().out.strip()
+    (wt / "app-flutter/b.txt").write_text("b\n"); at.main(["commit", "both", "-m", "b", "app-flutter/b.txt"])
+    capsys.readouterr(); at.main(["diff", "both", "--since", since])
+    out = capsys.readouterr().out
+    assert "app-flutter/b.txt" in out and "app-backend/a.txt" not in out
+
+
+def test_test_runs_each_repo_and_names_failure(ws, capsys):
+    wt = new_ws_feature(ws); capsys.readouterr()
+    assert at.main(["test", "both"]) == 0
+    (wt / "app-flutter/ui.txt").unlink(); at.main(["commit", "both", "-m", "rm", "app-flutter/ui.txt"])
+    assert at.main(["test", "both"]) == 1
+    assert "app-flutter Test: FAILED" in capsys.readouterr().out
+    assert "fail(app-flutter:test)" in at.read_status(wt / ".agent-team/features/both/status.md")["tests"]

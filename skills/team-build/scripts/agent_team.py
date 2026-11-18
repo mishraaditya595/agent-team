@@ -593,13 +593,23 @@ def diff_args(slug, since=None):
     return [rng, "--", ".", *exclude_specs(project_md())]
 
 
+def ws_diffs(slug, since=None):
+    """Workspace mode: [(repo, git diff args)] with per-repo --since ranges and repo-prefixed paths."""
+    since, ex, out = parse_since(since), exclude_specs(project_md()), []
+    for r in ws_repos(slug):
+        rng = f"{since[r['path']]}..HEAD" if isinstance(since, dict) and r["path"] in since else \
+            f"{since}..HEAD" if isinstance(since, str) else f"origin/{repo_branch(r)}...HEAD"
+        out.append((r, [f"--src-prefix=a/{r['path']}/", f"--dst-prefix=b/{r['path']}/", rng, "--", ".", *ex]))
+    return out
+
+
 def diffstat(slug, since=None):
-    out = git("diff", "--shortstat", *diff_args(slug, since), cwd=work_dir(slug))
-    files = re.search(r"(\d+) files? changed", out)
-    ins = re.search(r"(\d+) insertions?", out)
-    dels = re.search(r"(\d+) deletions?", out)
-    n = lambda m: int(m.group(1)) if m else 0
-    return n(ins) + n(dels), n(files)
+    if ws_repos(slug):
+        outs = [git("diff", "--shortstat", *args, cwd=r["wt"]) for r, args in ws_diffs(slug, since)]
+    else:
+        outs = [git("diff", "--shortstat", *diff_args(slug, since), cwd=work_dir(slug))]
+    n = lambda pat: sum(int(m.group(1)) for o in outs if (m := re.search(pat, o)))
+    return n(r"(\d+) insertions?") + n(r"(\d+) deletions?"), n(r"(\d+) files? changed")
 
 
 def code_key(wt):
@@ -897,8 +907,14 @@ def cmd_diff(a):
         lines, files = diffstat(a.slug, a.since)
         print(f"{lines} lines, {files} files")
         return
-    args = ["diff"] + (["--stat"] if a.stat else ["--unified=3"]) + diff_args(a.slug, a.since)
-    sys.stdout.write(git(*args, cwd=wt) + "\n")
+    mode = ["--stat"] if a.stat else ["--unified=3"]
+    if ws_repos(a.slug):
+        for r, args in ws_diffs(a.slug, a.since):
+            if a.stat:
+                print(f"## {r['path']}")
+            sys.stdout.write(git("diff", *mode, *args, cwd=r["wt"]) + "\n")
+        return
+    sys.stdout.write(git("diff", *mode, *diff_args(a.slug, a.since), cwd=wt) + "\n")
 
 
 def cmd_test(a):
@@ -907,27 +923,35 @@ def cmd_test(a):
         raise Fail(f"no worktree at {wt}")
     text = project_md()
     p = feature_dir(wt, a.slug) / "status.md"
-    key = code_key(wt)
-    cmds = (project_command("Build", text) or "") + "\n" + (project_command("Test", text) or "")
+    rs = ws_repos(a.slug)
+    # (label, name, cmd, cwd); label is "" in single-repo mode so output stays unchanged
+    steps = [("", n, project_command(n, text), wt) for n in (("Build",) if a.build else ()) + ("Test",)]
+    if rs:
+        steps = [s for s in steps if s[2]] + [(f"{r['path']} ", n, block_command(n, r["body"]), r["wt"])
+                                             for r in rs for n in (("Build",) if a.build else ()) + ("Test",)]
+    keys = [code_key(c) for c in ([r["wt"] for r in rs] or [wt])]
+    key = None if None in keys else "+".join(keys) or None
+    cmds = "\n".join((project_command(n, text) or "") if not rs else (project_command(n, text) or "") + "".join(
+        "\n" + (block_command(n, r["body"]) or "") for r in rs) for n in ("Build", "Test"))
     if key:
         key += "+" + hashlib.sha1(cmds.encode()).hexdigest()[:6]
     cached = read_status(p).get("tests", "none")
     if key and not a.force and not a.build and cached.split(" ")[0] == key:
         print(f"tests (cached for {key}): {cached.split(' ', 1)[1]}")
         return 0 if cached.endswith("pass") else 1
-    steps = ([("Build", project_command("Build", text))] if a.build else []) + [("Test", project_command("Test", text))]
-    for name, cmd in steps:
+    for label, name, cmd, cwd in steps:
         if not cmd:
-            print(f"{name}: none configured in project.md")
+            print(f"{label}{name}: none configured" + ("" if rs else " in project.md"))
             continue
         print(f"$ {cmd}")
-        r = run(cmd, cwd=wt, check=False, shell=True)
+        r = run(cmd, cwd=cwd, check=False, shell=True)
         out = (r.stdout + r.stderr).strip().splitlines()
         if r.returncode:
             print("\n".join(out[-40:]))
             if key:
-                write_status(p, {"tests": f"{key} fail({name.lower()})"})
-            print(f"{name}: FAILED (exit {r.returncode})")
+                who = f"{label.strip()}:" if label else ""
+                write_status(p, {"tests": f"{key} fail({who}{name.lower()})"})
+            print(f"{label}{name}: FAILED (exit {r.returncode})")
             return 1
         print("\n".join(out[-3:]))
     if key:
