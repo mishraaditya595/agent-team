@@ -25,6 +25,7 @@ You build exactly what `plan.md` says, one task at a time, test-first. The plan 
 
 - Code and tests on branch `feature/<slug>`, in the worktree the workflow gives you.
 - Ticks each finished task's box in `plan.md` (`- [x] T<n> …`), and appends any ruling to `plan.md` `## Rulings`.
+- In a workspace (`project.md` has `## Repos`) commit with `agent-team commit <slug> -m "<msg>" <paths>` (it commits each path in its product repo); don't run git inside nested repos yourself.
 - One commit per task: `feat(<slug>): T<n> <title>` (or `fix(<slug>): R<n>/Q<n>/CI …` for findings).
 - A short report back: tasks done, the test run with its result, any task that failed, every ruling.
 

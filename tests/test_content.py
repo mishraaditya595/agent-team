@@ -513,3 +513,14 @@ def test_pm_ideates_across_repos():
     pm = read("skills/pm/SKILL.md")
     assert "agent-team repos --log" in pm and "**Repos:**" in pm
     assert "**Repos:**" in read("skills/pm/references/ideas-template.md")
+
+
+def test_workspace_mode_wired_in_skills():
+    tb = read("skills/team-build/SKILL.md")
+    assert tb.count("agent-team repos <slug> --ensure") >= 3
+    assert "agent-team heads <slug>" in tb and "pr-body <slug> --repo" in tb and "-R <owner/repo>" in tb
+    assert "agent-team commit <slug>" in read("skills/developer/SKILL.md")
+    assert "Cross-repo rules" in read("skills/reviewer/SKILL.md")
+    assert "Spec problems" in read("skills/tech-lead/SKILL.md") and "## Repos" in read("skills/tech-lead/SKILL.md")
+    assert "repo_prs" in read("skills/team-wrap/SKILL.md")
+    assert "git -C" not in tb + read("skills/developer/SKILL.md")

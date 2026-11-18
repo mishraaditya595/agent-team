@@ -56,6 +56,10 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `pull` / `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected or `docs-push: pr-only` is set; `pull` replaces `git pull` in the workflows |
 | `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
 
+## Workspaces
+
+A workspace is a directory (its own git repo) that holds several product repos side by side. Its `project.md` has `## Repos` (path, `Order:` = merge order, `## Cross-repo rules`). Features run in a worktree of the workspace repo with nested product worktrees under it (`agent-team repos <slug> --ensure`). Each touched repo gets its own `feature/<slug>` PR, plus one workspace PR that carries the spec and plan and lists the product PRs. Merge product PRs in `Order:`, the workspace PR last; `team-wrap` checks all of them. Without `## Repos`, nothing changes.
+
 ## Models and cost
 
 Roles name a **tier**; `skills/team-build/references/models.yaml` maps tiers to each tool's models and reasoning effort. Check the Codex and Gemini model ids there against your accounts.
