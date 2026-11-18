@@ -1068,36 +1068,55 @@ def cmd_idea(a):
     print(f"status={info['status']} effort={info['effort'] or '?'}")
 
 
-def cmd_ci(a):
-    """Waits for checks to appear (GitHub can take a minute after a push) before deciding there is no CI."""
-    pr = read_status(status_path(a.slug)).get("pr", "none")
-    if pr in ("", "none"):
-        raise Fail("no pr in status.md")
-    wd = work_dir(a.slug)
-    has_workflows = any((wd / ".github" / "workflows").glob("*.y*ml"))
-    grace = a.grace if a.grace is not None else (300 if has_workflows else 60)
+def repo_prs(slug):
+    """status `repo_prs` ("app-backend#12 app-flutter#40") as {path: PR number}; {} for none."""
+    return dict(t.rsplit("#", 1) for t in read_status(status_path(slug)).get("repo_prs", "none").split() if "#" in t)
+
+
+def _ci_one(pr, cwd, grace, watch, repo=None):
+    """One PR's checks → (pass|none|pending|fail, output). Waits for checks to appear (GitHub can take a
+    minute after a push) before deciding there is no CI."""
+    R = ["-R", repo] if repo else []
     deadline = time.monotonic() + grace
     while True:
-        r = run(["gh", "pr", "checks", pr], cwd=wd, check=False)
+        r = run(["gh", "pr", "checks", pr, *R], cwd=cwd, check=False)
         out = (r.stdout + r.stderr).strip()
         if "no checks reported" not in out.lower():
             break
         if time.monotonic() >= deadline:
-            print(f"ci: none (no checks appeared within {grace}s)")
-            return 0
+            return "none", f"(no checks appeared within {grace}s)"
         time.sleep(POLL_SECONDS)
-    if a.watch:
-        r = run(["gh", "pr", "checks", pr, "--watch", "--interval", "30"], cwd=wd, check=False)
+    if watch:
+        r = run(["gh", "pr", "checks", pr, *R, "--watch", "--interval", "30"], cwd=cwd, check=False)
         out = (r.stdout + r.stderr).strip()
     if r.returncode == 0:
-        print("ci: pass")
-        return 0
+        return "pass", out
     if r.returncode == 8:
-        print("ci: pending")
-        return 0
-    print("\n".join(l for l in out.splitlines() if re.search(r"\bfail", l, re.I)) or out[-2000:])
-    print("ci: fail")
-    return 1
+        return "pending", out
+    return "fail", "\n".join(l for l in out.splitlines() if re.search(r"\bfail", l, re.I)) or out[-2000:]
+
+
+def cmd_ci(a):
+    pr = read_status(status_path(a.slug)).get("pr", "none")
+    rps = repo_prs(a.slug)
+    if pr in ("", "none") and not rps:
+        raise Fail("no pr in status.md")
+    # (label, pr, cwd, -R repo): product PRs first, then the workspace/only PR
+    units = [(f"{r['path']}#{rps[r['path']]}:", rps[r["path"]], r["wt"], gh_slug(r["src"]))
+             for r in ws_repos(a.slug) if r["path"] in rps]
+    if pr not in ("", "none"):
+        units.append((f"workspace#{pr}:" if units else None, pr, work_dir(a.slug), None))
+    states = []
+    for label, n, cwd, repo in units:
+        has_workflows = any((cwd / ".github" / "workflows").glob("*.y*ml"))
+        grace = a.grace if a.grace is not None else (300 if has_workflows else 60)
+        state, out = _ci_one(n, cwd, grace, a.watch, repo)
+        states.append(state)
+        if state == "fail":
+            print((label + "\n" if label else "") + out)
+    state = next((x for x in ("fail", "pending", "pass") if x in states), "none")
+    print(f"ci: {state}" + (f" {out}" if state == "none" and len(units) == 1 else ""))
+    return 1 if state == "fail" else 0
 
 
 def github_blob_base(wt, branch):
@@ -1119,11 +1138,25 @@ def _decisions_to_check(fd):
     return assumed + rulings
 
 
+def _merge_order(slug, this=None):
+    """Product PRs in workspace order, `owner/repo#n` joined with →; `this` (a path) is marked."""
+    rps = repo_prs(slug)
+    items = [f"{gh_slug(r['src']) or r['path']}#{rps.get(r['path'], '?')}" + (" (this PR)" if r["path"] == this else "")
+             for r in ws_repos(slug) if r["path"] in rps or r["path"] == this]
+    return " → ".join(items)
+
+
 def cmd_pr_body(a):
     wt = work_dir(a.slug)
     fd = feature_dir(wt, a.slug)
     rel = f".agent-team/features/{a.slug}/"
     base = github_blob_base(wt, f"feature/{a.slug}")
+    if a.repo:
+        pr, root_slug = read_status(status_path(a.slug)).get("pr", "none"), gh_slug(repo_root())
+        ws_pr = f"[workspace PR](https://github.com/{root_slug}/pull/{pr})" if root_slug and pr.isdigit() else "workspace PR"
+        print(f"## Summary\n{a.summary or '<!-- 3 lines -->'}\n\nPart of {a.slug}. Artifacts and reviews: {ws_pr}\n\n"
+              f"## Merge order\n{_merge_order(a.slug, a.repo)}")
+        return
     link = lambda name: f"[{name}]({base}{rel}{name})" if base else f"`{rel}{name}`"
     reports = sorted(p.name for p in fd.glob("review-*.md")) + sorted(p.name for p in fd.glob("qa-*.md"))
     parts = []
@@ -1140,6 +1173,8 @@ def cmd_pr_body(a):
     log = st.read_text().split("## Log", 1)[1].strip() if st.exists() and "## Log" in st.read_text() else ""
     log = "\n".join(l for l in log.splitlines() if not l.startswith("<!--"))
     parts.append("## Tier / model log\n```\n" + (log or "(empty)") + "\n```")
+    if repo_prs(a.slug):
+        parts.append("## Product PRs\n" + _merge_order(a.slug) + "\n\nMerge these first, this one last.")
     print("\n\n".join(parts))
 
 
@@ -1177,8 +1212,9 @@ def cmd_summary(a):
         s = read_status_text(text)
         tokens, cost = _sum_usage(text.split("## Log", 1)[-1])
         note = s.get("stop_reason", "none")
+        pr = s.get("pr", "none") + ("" if s.get("repo_prs", "none") == "none" else f" + {s['repo_prs']}")
         rows.append(f"| {slug} | {s.get('stage', '?')} | {s.get('review_round', '0')} | {s.get('qa_round', '0')} | "
-                    f"{s.get('pr', 'none')} | {tokens or '-'} | {f'${cost:.2f}' if cost else '-'} | "
+                    f"{pr} | {tokens or '-'} | {f'${cost:.2f}' if cost else '-'} | "
                     f"{'' if note == 'none' else note} |")
     if not rows:
         print("no features yet")
@@ -1187,25 +1223,18 @@ def cmd_summary(a):
     print("\n".join(rows))
 
 
-def merged_pr_head(pr, cwd):
+def merged_pr_head(pr, cwd, repo=None):
     """Head commit of a merged PR, or None (not merged, unknown, or gh unavailable)."""
     if pr in ("", "none", None):
         return None
-    r = run(["gh", "pr", "view", pr, "--json", "state,headRefOid", "-q", '.state + " " + .headRefOid'],
-            cwd=cwd, check=False)
+    r = run(["gh", "pr", "view", pr, *(["-R", repo] if repo else []), "--json", "state,headRefOid", "-q",
+             '.state + " " + .headRefOid'], cwd=cwd, check=False)
     state, _, oid = r.stdout.strip().partition(" ")
     return oid if r.returncode == 0 and state == "MERGED" and oid else None
 
 
-def cmd_cleanup(a):
-    """Remove a feature's worktree and branches — only when nothing would be lost (or --force)."""
-    root = repo_root()
-    wt = worktree(a.slug)
-    branch = f"feature/{a.slug}"
-    sp = status_path(a.slug)
-    pr = read_status(sp).get("pr", "none") if sp.exists() else "none"
-    git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
-    pr_head = merged_pr_head(pr, root)
+def _cleanup_problems(root, wt, branch, pr_head, remote):
+    """What removing wt and branch (of the repo at root) would lose."""
     problems = []
     if wt.exists() and git("status", "--porcelain", cwd=wt):
         problems.append(f"uncommitted changes in {wt} — commit or discard them")
@@ -1214,7 +1243,7 @@ def cmd_cleanup(a):
         n = git("rev-list", "--count", tip, "--not", "--remotes", cwd=root, check=False)
         problems.append(f"{n} commit(s) on {branch} are not on the remote and not in a merged PR — push them")
     remote_tip = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False)
-    if a.remote and remote_tip:
+    if remote and remote_tip:
         try:
             in_default = _is_ancestor(remote_tip, f"origin/{default_branch(root)}", root)
         except Fail:
@@ -1222,18 +1251,48 @@ def cmd_cleanup(a):
         if remote_tip != pr_head and not in_default:
             problems.append(f"origin/{branch} is not merged (no merged PR with that head, and not in the "
                             f"default branch) — merge its PR first, or run without --remote")
-    if problems and not a.force:
+    return problems
+
+
+def _cleanup_one(root, wt, branch, pr_head, remote, force):
+    """Check (unless force), then remove wt and the local (and with remote, origin's) branch of the repo at root."""
+    problems = _cleanup_problems(root, wt, branch, pr_head, remote)
+    if problems and not force:
         raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's really "
                    "what you want.")
     if wt.exists():
         git("worktree", "remove", "--force", str(wt), cwd=root)
         print(f"removed worktree {wt}")
-    if tip:
+    if git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=root, check=False):
         git("branch", "-D", branch, cwd=root)
         print(f"deleted local {branch}")
-    if a.remote and remote_tip:
+    if remote and git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False):
         git("push", "origin", "--delete", branch, cwd=root)
         print(f"deleted origin/{branch}")
+
+
+def cmd_cleanup(a):
+    """Remove a feature's worktrees and branches — only when nothing would be lost (or --force)."""
+    root = repo_root()
+    branch = f"feature/{a.slug}"
+    sp = status_path(a.slug)
+    pr = read_status(sp).get("pr", "none") if sp.exists() else "none"
+    rps = repo_prs(a.slug) if sp.exists() else {}
+    # (label, repo root, worktree, merged-PR head): product repos first, the workspace last
+    units = []
+    for r in ws_repos(a.slug) if sp.exists() else []:
+        git("fetch", "-q", "--prune", "origin", cwd=r["src"], check=False)
+        units.append((r["path"], r["src"], r["wt"], merged_pr_head(rps.get(r["path"]), r["src"], gh_slug(r["src"]))))
+    git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
+    units.append((None, root, worktree(a.slug), merged_pr_head(pr, root)))
+    if not a.force:   # check every repo before removing anything
+        problems = [f"{label}: {p}" if label else p for label, src, wt, head in units
+                    for p in _cleanup_problems(src, wt, branch, head, a.remote)]
+        if problems:
+            raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's "
+                       "really what you want.")
+    for _, src, wt, head in units:
+        _cleanup_one(src, wt, branch, head, a.remote, a.force)
 
 
 # ---------- docs commits (never on the local default branch) ----------
@@ -1608,6 +1667,7 @@ def build_parser():
     s.set_defaults(fn=cmd_ci)
     s = sub.add_parser("pr-body", help="print the PR body")
     s.add_argument("slug"); s.add_argument("--summary"); s.add_argument("--stopped", metavar="REASON")
+    s.add_argument("--repo", metavar="PATH", help="body for this product repo's PR (workspace mode)")
     s.set_defaults(fn=cmd_pr_body)
     s = sub.add_parser("summary", help="all features: stage, rounds, tokens, cost")
     s.set_defaults(fn=cmd_summary)

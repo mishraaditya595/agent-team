@@ -163,11 +163,8 @@ def test_ensure_resumes_from_pushed_product_branch(ws, tmp_path):
     (wt / "app-backend" / "new.txt").write_text("x")
     sh("git", "add", "-A", cwd=wt / "app-backend"); sh("git", "commit", "-qm", "work", cwd=wt / "app-backend")
     sh("git", "push", "-q", cwd=wt / "app-backend")
-    # Task 7 switches this to cleanup: this machine forgets everything
-    for p in ("app-backend", "app-flutter"):
-        sh("git", "worktree", "remove", "--force", str(wt / p), cwd=ws / p)
-        sh("git", "branch", "-qD", "feature/both", cwd=ws / p)
-    sh("git", "worktree", "remove", "--force", str(wt), cwd=ws)
+    # this machine forgets everything
+    assert at.main(["cleanup", "both", "--force"]) == 0
     sh("git", "worktree", "add", "-q", str(wt), "feature/both", cwd=ws)
     assert at.main(["repos", "both", "--ensure"]) == 0
     assert (wt / "app-backend" / "new.txt").exists()
@@ -287,3 +284,78 @@ def test_test_runs_each_repo_and_names_failure(ws, capsys):
     assert at.main(["test", "both"]) == 1
     assert "app-flutter Test: FAILED" in capsys.readouterr().out
     assert "fail(app-flutter:test)" in at.read_status(wt / ".agent-team/features/both/status.md")["tests"]
+
+
+def ws_gh(tmp_path, monkeypatch, checks):
+    """gh stub: `pr checks <n>` exits/prints checks[n]; `pr view` prints OPEN x."""
+    import os
+    bin_ = tmp_path / "fakebin"; bin_.mkdir(exist_ok=True)
+    (bin_ / "gh").write_text(f'''#!/usr/bin/env python3
+import sys
+a = sys.argv[1:]
+checks = {checks!r}
+if a[:2] == ["pr", "checks"]:
+    code, text = checks[a[2]]
+    print(text); sys.exit(code)
+if a[:2] == ["pr", "view"]:
+    print("OPEN x")
+''')
+    (bin_ / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+    monkeypatch.setattr(at, "POLL_SECONDS", 0)
+
+
+def test_ci_fails_when_one_product_pr_fails(ws, tmp_path, monkeypatch, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    ws_gh(tmp_path, monkeypatch, checks={"12": (0, "ok"), "40": (1, "build\tfail\t1m\turl"), "3": (0, "ok")})
+    assert at.main(["ci", "both", "--grace", "0"]) == 1
+    out = capsys.readouterr().out
+    assert "app-flutter#40:" in out and "ci: fail" in out
+
+
+def test_ci_workspace_all_pass(ws, tmp_path, monkeypatch, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    ws_gh(tmp_path, monkeypatch, checks={"12": (0, "ok"), "40": (8, "p"), "3": (0, "ok")})
+    assert at.main(["ci", "both", "--grace", "0"]) == 0
+    assert "ci: pending" in capsys.readouterr().out
+
+
+def test_pr_body_for_product_lists_merge_order(ws, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    capsys.readouterr(); at.main(["pr-body", "both", "--repo", "app-flutter", "--summary", "s"])
+    out = capsys.readouterr().out
+    assert "## Merge order" in out and out.index("#12") < out.index("#40") and "(this PR)" in out
+
+
+def test_pr_body_workspace_lists_product_prs(ws, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    capsys.readouterr(); at.main(["pr-body", "both", "--summary", "s"])
+    out = capsys.readouterr().out
+    assert "## Product PRs" in out and "Merge these first, this one last." in out and "## Artifacts" in out
+
+
+def test_cleanup_removes_product_worktrees(ws):
+    wt = new_ws_feature(ws)
+    assert at.main(["cleanup", "both", "--force"]) == 0
+    assert not wt.exists()
+    assert "feature/both" not in sh("git", "branch", cwd=ws / "app-backend")
+
+
+def test_cleanup_refuses_unpushed_product_commit(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/u.txt").write_text("u"); at.main(["commit", "both", "-m", "u", "app-backend/u.txt"])
+    assert at.main(["cleanup", "both"]) == 1
+    assert "app-backend" in capsys.readouterr().err
+    assert (wt / "app-backend/u.txt").exists()
+
+
+def test_cleanup_refuses_uncommitted_product_change(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-flutter/ui.txt").write_text("edited")
+    assert at.main(["cleanup", "both"]) == 1
+    assert "app-flutter" in capsys.readouterr().err
+    assert (wt / "app-flutter/ui.txt").read_text() == "edited"
