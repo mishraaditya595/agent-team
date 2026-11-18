@@ -302,6 +302,13 @@ def project_command(name, text=None):
     return m.group(1).strip()
 
 
+def docs_pr_only(text):
+    """project.md ## Conventions has `- docs-push: pr-only`: docs never go straight to the default branch.
+    text None (no project.md yet) → False."""
+    return bool(text) and bool(re.search(r"^\s*-\s*docs-push:\s*pr-only\b", section(text, "Conventions"),
+                                         re.M | re.I))
+
+
 # ---------- status.md ----------
 
 LINE = re.compile(r"^([a-z_]+):(\s*)(.*?)(\s+#.*)?$")
@@ -1120,15 +1127,16 @@ def cmd_pull(a):
 def cmd_docs_commit(a):
     """Commit agent-team docs edited in the checkout without committing on the local default branch:
     a temp worktree gets the edits, pushes to the default branch, or to agent-team/meta (+ PR) if it's
-    protected or meta already has unmerged docs. The checkout's copies are then reset to match."""
+    protected, meta already has unmerged docs, or project.md says docs-push: pr-only. The checkout's
+    copies are then reset to match."""
     root = repo_root()
     d = default_branch(root)
     git("fetch", "-q", "origin", cwd=root)
     files = _expand_paths(root, a.paths)
     if not files:
         raise Fail("nothing to commit: none of those paths exist")
-    meta_open = meta_active(root, d)
-    target, changed = _docs_attempt(root, d, files, a.message, to_meta=meta_open)
+    to_meta = docs_pr_only(read_doc(".agent-team/project.md")) or meta_active(root, d)
+    target, changed = _docs_attempt(root, d, files, a.message, to_meta=to_meta)
     if target == "protected":
         target, changed = _docs_attempt(root, d, files, a.message, to_meta=True)
     if target is None:
@@ -1151,7 +1159,7 @@ def cmd_docs_commit(a):
                                                                  f"commits: pull it yourself)"))
     else:
         url = _meta_pr(root, d, a.title or "agent-team: docs")
-        print(f"pushed to {META} ({d} is protected or has an open docs PR). "
+        print(f"pushed to {META} ({d} is protected, has an open docs PR, or docs-push is pr-only). "
               + (f"PR: {url}" if url else f"Open a PR from {META} into {d}."))
     print("files: " + " ".join(changed))
     if target != d and any(not f.startswith(".agent-team/") for f in changed):
