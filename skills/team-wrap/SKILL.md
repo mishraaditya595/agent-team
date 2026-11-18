@@ -19,7 +19,7 @@ Closes a merged feature so the next one starts cleaner. Run it on a standard-tie
    - a task tagged `[fast]` that had to escalate, and why;
    - a stop reason and what would have prevented it.
    One line each: what to do or avoid, and why, ending `(<slug>)`. Skip anything already covered, one-off typos and things a linter catches. Nothing worth keeping → add nothing; that's a fine outcome. Keep the file ≤ 40 lines: when it would grow past that, merge similar lines and drop lessons that no longer hold. Then `agent-team status <slug> --set retro=done`.
-6. **Commit only agent-team files:** `agent-team docs-commit -m "docs(<slug>): wrap up" --title "agent-team: docs" .agent-team/features/<slug> .agent-team/ideas.md .agent-team/lessons.md`. `agent-team docs-commit` commits from a temporary worktree — never on your local default branch — and pushes to `$D`, or, if `$D` is protected or an `agent-team/meta` PR is still open, to `agent-team/meta`, opening or reusing its PR.
+6. **Commit only agent-team files:** `agent-team docs-commit -m "docs(<slug>): wrap up" --title "agent-team: docs" .agent-team/features/<slug> .agent-team/ideas.md .agent-team/lessons.md`. `agent-team docs-commit` commits from a temporary worktree — never on your local default branch — and pushes to `$D`, or, if `$D` is protected, an `agent-team/meta` PR is still open, or `project.md` sets `docs-push: pr-only`, to `agent-team/meta`, opening or reusing its PR.
 7. **Tell the owner** in two lines: the lessons added (or "none"), and "Run `team-market <slug>` for outreach drafts."
 
 ## Never

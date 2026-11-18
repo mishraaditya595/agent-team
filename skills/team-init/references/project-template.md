@@ -25,6 +25,7 @@
 
 ## Conventions
 <Code style, branching, commit style, folders to never touch.>
+<!-- Optional: `- docs-push: pr-only` sends every agent-team docs push through an agent-team/meta PR, even if the default branch isn't protected. -->
 
 ## Positioning & voice
 <One-line positioning. Tone of voice in 3 adjectives. Words to use / avoid.>

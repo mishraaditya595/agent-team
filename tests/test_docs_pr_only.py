@@ -37,3 +37,8 @@ def test_docs_pr_only_parsing():
     assert not at.docs_pr_only(base.format("- docs-push: direct"))
     assert not at.docs_pr_only("# x\n\n## Channels\n- docs-push: pr-only\n")   # wrong section
     assert not at.docs_pr_only(None)
+
+
+def test_template_example_does_not_enable_it():
+    from test_agent_team import ROOT
+    assert not at.docs_pr_only((ROOT / "skills/team-init/references/project-template.md").read_text())

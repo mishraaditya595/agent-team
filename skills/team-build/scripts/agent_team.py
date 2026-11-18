@@ -1331,7 +1331,7 @@ def build_parser():
                                        "its PR is open (run before a role edits them)")
     s.set_defaults(fn=cmd_docs_pull)
     s = sub.add_parser("docs-commit", help="commit agent-team docs to the default branch (or agent-team/meta "
-                                         "if protected) without committing on the local default branch")
+                                         "if protected or docs-push: pr-only) without committing on the local default branch")
     s.add_argument("-m", "--message", required=True); s.add_argument("--title")
     s.add_argument("paths", nargs="+"); s.set_defaults(fn=cmd_docs_commit)
     s = sub.add_parser("upgrade", help="bring a repo set up by an older agent-team up to date (adds only)")
