@@ -32,7 +32,7 @@ POLL_SECONDS = 15
 
 TIERS = ("deep", "standard", "fast")
 STAGES = ("spec", "grill", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
-STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
+STATUS_KEYS = ("stage", "branch", "pr", "repos", "repo_prs", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
                "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro")
 IDEA_STATUSES = ("proposed", "shipped", "rejected")   # in progress = a feature/<slug> branch exists
 LEASE_TTL_HOURS = 6   # a lease older than this (no log/commit since) counts as abandoned
@@ -610,6 +610,51 @@ def code_key(wt):
     return git("log", "-1", "--format=%h", "--", ".", ":(exclude).agent-team", cwd=wt) or None
 
 
+def task_files(plan):
+    """Paths from each ## Tasks checkbox line's `files: a, b` segment (up to the next ' — ')."""
+    out = []
+    for line in section(plan, "Tasks").splitlines():
+        m = CHECKBOX.match(line) and re.search(r"files:\s*(.+?)(?:\s+—\s|$)", line)
+        out += [p.strip().strip("`") for p in m.group(1).split(",") if p.strip()] if m else []
+    return out
+
+
+def ws_repos(slug):
+    """Touched product repos of a workspace feature (status `repos`), with their worktree and source paths."""
+    names = read_status(status_path(slug)).get("repos", "none").split()
+    return [{**r, "wt": worktree(slug) / r["path"], "src": repo_root() / r["path"]}
+            for r in repos() if r["path"] in names]
+
+
+def ensure_repo_worktrees(slug):
+    """Nest one worktree per touched product repo at <wt>/<path> on feature/<slug>; record them in status `repos`."""
+    wt, sp = worktree(slug), status_path(slug)
+    plan = feature_dir(wt, slug) / "plan.md"
+    paths = task_files(plan.read_text()) if plan.exists() else []
+    want = set(read_status(sp).get("repos", "none").split()) | set(idea_info(slug)["repos"] or [])
+    rs = [r for r in repos() if r["path"] in want or any(p.startswith(r["path"] + "/") for p in paths)]
+    branch = f"feature/{slug}"
+    for r in rs:
+        dest, src = wt / r["path"], repo_root() / r["path"]
+        if dest.exists():
+            continue
+        if run(["git", "check-ignore", "-q", f"{r['path']}/"], cwd=wt, check=False).returncode:
+            raise Fail(f"{r['path']} is not gitignored by the workspace; add /{r['path']}/ to .gitignore")
+        local = run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"], cwd=src, check=False).returncode == 0
+        if git("ls-remote", "--heads", "origin", branch, cwd=src):
+            git("fetch", "-q", "origin", branch, cwd=src)
+            git("worktree", "add", "-q", *(() if local else ("--track", "-b", branch)), str(dest),
+                *((branch,) if local else (f"origin/{branch}",)), cwd=src)
+        else:
+            base = repo_branch(r)
+            git("fetch", "-q", "origin", base, cwd=src)
+            git("worktree", "add", "-q", *((str(dest), branch) if local else ("-b", branch, str(dest), f"origin/{base}")), cwd=src)
+            git("push", "-q", "-u", "origin", branch, cwd=dest)
+    names = [r["path"] for r in rs]
+    write_status(sp, {"repos": " ".join(names) or "none"})
+    return names
+
+
 # ---------- commands ----------
 
 def cmd_default_branch(a):
@@ -620,6 +665,11 @@ def cmd_repos(a):
     rs = repos()
     if not rs:
         print("single-repo (no ## Repos)")
+        return
+    if a.ensure:
+        if not a.slug:
+            raise Fail("repos --ensure needs a slug")
+        print("repos: " + " ".join(ensure_repo_worktrees(a.slug)))
         return
     for r in rs:
         d = repo_root() / r["path"]
@@ -772,6 +822,9 @@ def cmd_tasks(a):
 
 
 def cmd_drift(a):
+    if repos():
+        print("drift: unchecked (workspace mode)")
+        return 0
     wt = work_dir(a.slug)
     plan = feature_dir(wt, a.slug) / "plan.md"
     if not plan.exists():
@@ -1426,6 +1479,7 @@ def build_parser():
     s.set_defaults(fn=cmd_default_branch)
     s = sub.add_parser("repos", help="list the nested product repos from project.md ## Repos")
     s.add_argument("slug", nargs="?"); s.add_argument("--log", action="store_true")
+    s.add_argument("--ensure", action="store_true", help="nest a worktree per touched repo under the feature's worktree")
     s.set_defaults(fn=cmd_repos)
     s = sub.add_parser("init-status", help="write a fresh status.md in the feature's worktree")
     s.add_argument("slug"); s.set_defaults(fn=cmd_init_status)

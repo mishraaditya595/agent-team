@@ -135,3 +135,59 @@ def test_allow_list_covers_repo_commands():
 
 def test_idea_info_repos(ws):
     assert at.idea_info("both")["repos"] == ["app-backend", "app-flutter"]
+
+
+def new_ws_feature(work, slug="both", ensure=True):
+    wt = work / ".agent-team" / "worktrees" / slug
+    sh("git", "worktree", "add", "-q", "-b", f"feature/{slug}", str(wt), "origin/main", cwd=work)
+    assert at.main(["init-status", slug]) == 0
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
+    sh("git", "push", "-q", "-u", "origin", f"feature/{slug}", cwd=wt)
+    if ensure:
+        assert at.main(["repos", slug, "--ensure"]) == 0
+    return wt
+
+
+def test_ensure_creates_product_worktrees_and_pushes(ws, capsys):
+    wt = new_ws_feature(ws)
+    for p, f in (("app-backend", "api.txt"), ("app-flutter", "ui.txt")):
+        assert (wt / p / f).exists()
+        assert sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=wt / p) == "feature/both"
+        assert sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=ws / p)
+    assert at.read_status(wt / ".agent-team/features/both/status.md")["repos"] == "app-backend app-flutter"
+    assert sh("git", "status", "--porcelain", cwd=wt) == "M .agent-team/features/both/status.md"  # only the status write; nested checkouts are ignored
+
+
+def test_ensure_resumes_from_pushed_product_branch(ws, tmp_path):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend" / "new.txt").write_text("x")
+    sh("git", "add", "-A", cwd=wt / "app-backend"); sh("git", "commit", "-qm", "work", cwd=wt / "app-backend")
+    sh("git", "push", "-q", cwd=wt / "app-backend")
+    # Task 7 switches this to cleanup: this machine forgets everything
+    for p in ("app-backend", "app-flutter"):
+        sh("git", "worktree", "remove", "--force", str(wt / p), cwd=ws / p)
+        sh("git", "branch", "-qD", "feature/both", cwd=ws / p)
+    sh("git", "worktree", "remove", "--force", str(wt), cwd=ws)
+    sh("git", "worktree", "add", "-q", str(wt), "feature/both", cwd=ws)
+    assert at.main(["repos", "both", "--ensure"]) == 0
+    assert (wt / "app-backend" / "new.txt").exists()
+
+
+def test_ensure_refuses_unignored_repo(ws, capsys):
+    (ws / ".gitignore").write_text(".agent-team/worktrees/\n/app-flutter/\n")
+    sh("git", "commit", "-qam", "unignore", cwd=ws); sh("git", "push", "-q", cwd=ws)
+    new_ws_feature(ws, ensure=False)
+    assert at.main(["repos", "both", "--ensure"]) == 1
+    assert "app-backend is not gitignored" in capsys.readouterr().err
+
+
+def test_task_files_and_plan_adds_repo(ws):
+    assert at.task_files("## Tasks\n- [ ] T1 [fast] x — files: `app-backend/a.py`, app-flutter/b — maps to: AC1\n") \
+        == ["app-backend/a.py", "app-flutter/b"]
+
+
+def test_drift_unchecked_in_workspace(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / ".agent-team/features/both/plan.md").write_text("planned-at: abc1234\n## Files\n- `app-backend/a`\n")
+    at.main(["drift", "both"])
+    assert "drift: unchecked (workspace mode)" in capsys.readouterr().out
