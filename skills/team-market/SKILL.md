@@ -16,7 +16,7 @@ Two ways in: a merged feature (`<slug>`, steps 1–7) or anything the owner want
 3. If the status's `stage` isn't `merged` yet, run the `team-wrap` skill for `<slug>` first.
 4. Pick the tier: `agent-team tier marketing <slug> --tool <tool>` (`deep` for `launch: true` in the spec, else `standard`; respects `project.md` `## Model overrides`).
 5. Dispatch the `marketing` role (dispatch notes: the `team-build` skill's `references/`) → `marketing.md`.
-6. `agent-team status <slug> --set stage=marketed`, `agent-team log <slug> marketed marketing --tier <t> --model <m> [--tokens <n>]`, then commit and push only those files: `agent-team docs-commit -m "docs(<slug>): marketing drafts" --title "agent-team: docs" .agent-team/features/<slug>`. `agent-team docs-commit` commits from a temporary worktree — never on your local default branch — and pushes to `$D`, or, if `$D` is protected or an `agent-team/meta` PR is still open, to `agent-team/meta`, opening or reusing its PR.
+6. `agent-team status <slug> --set stage=marketed`, `agent-team log <slug> marketed marketing --tier <t> --model <m> [--tokens <n>]`, then commit and push only those files: `agent-team docs-commit -m "docs(<slug>): marketing drafts" --title "agent-team: docs" .agent-team/features/<slug>`. `agent-team docs-commit` commits from a temporary worktree — never on your local default branch — and pushes to `$D`, or, if `$D` is protected, an `agent-team/meta` PR is still open, or `project.md` sets `docs-push: pr-only`, to `agent-team/meta`, opening or reusing its PR.
 7. Tell the owner the drafts are ready and list the channels covered. Nothing is posted.
 
 ## Topic
