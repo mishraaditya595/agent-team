@@ -295,13 +295,40 @@ def project_md():
     return text
 
 
-def project_command(name, text=None):
-    """`- Test: `cmd`` from project.md ## Build & test; None when missing or 'none'."""
-    body = section(text if text is not None else project_md(), "Build & test")
+def block_command(name, body):
+    """`- Test: `cmd`` in a block of text; None when missing or 'none'."""
     m = re.search(rf"^\s*-\s*{name}:\s*`([^`]+)`", body, re.M | re.I)
     if not m or m.group(1).strip().lower().startswith("none"):
         return None
     return m.group(1).strip()
+
+
+def project_command(name, text=None):
+    """`- Test: `cmd`` from project.md ## Build & test; None when missing or 'none'."""
+    return block_command(name, section(text if text is not None else project_md(), "Build & test"))
+
+
+def repos(text=None):
+    """Nested product repos from project.md ## Repos ([] = single-repo), `- Order:` in ## Cross-repo rules first."""
+    text = project_md() if text is None else text
+    parts = re.split(r"^###\s+(\S+)\s*$", section(text, "Repos"), flags=re.M)[1:]
+    out = []
+    for path, body in zip(parts[::2], parts[1::2]):
+        f = lambda k: (m.group(1).strip() if (m := re.search(rf"^\s*-\s*{k}:\s*(.+)$", body, re.M | re.I)) else None)
+        out.append({"path": path, "role": f("Role") or "", "branch": f("Branch"), "body": body})
+    m = re.search(r"^\s*-\s*Order:\s*(.+)$", section(text, "Cross-repo rules"), re.M | re.I)
+    order = [p.strip() for p in m.group(1).split(",")] if m else []
+    return sorted(out, key=lambda r: order.index(r["path"]) if r["path"] in order else len(order))  # stable
+
+
+def repo_branch(r):
+    return r["branch"] or default_branch(repo_root() / r["path"])
+
+
+def gh_slug(cwd):
+    url = git("remote", "get-url", "origin", cwd=cwd, check=False)
+    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+    return m.group(1) if m else ""
 
 
 def docs_pr_only(text):
@@ -585,6 +612,20 @@ def code_key(wt):
 
 def cmd_default_branch(a):
     print(default_branch())
+
+
+def cmd_repos(a):
+    rs = repos()
+    if not rs:
+        print("single-repo (no ## Repos)")
+        return
+    for r in rs:
+        d = repo_root() / r["path"]
+        if not d.is_dir() or Path(git("rev-parse", "--show-toplevel", cwd=d, check=False) or "/").resolve() != d.resolve():
+            raise Fail(f"{r['path']}: not a git repo at {d}")
+        print(f"{r['path']} branch={repo_branch(r)} repo={gh_slug(d) or '-'} head={git('rev-parse', '--short', 'HEAD', cwd=d)}")
+        if a.log:
+            print(git("log", "--oneline", "-30", cwd=d))
 
 
 def cmd_init_status(a):
@@ -930,9 +971,8 @@ def cmd_ci(a):
 
 
 def github_blob_base(wt, branch):
-    url = git("remote", "get-url", "origin", cwd=wt, check=False)
-    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
-    return f"https://github.com/{m.group(1)}/blob/{branch}/" if m else ""
+    slug = gh_slug(wt)
+    return f"https://github.com/{slug}/blob/{branch}/" if slug else ""
 
 
 def _section_lines(path, heading):
@@ -1361,6 +1401,9 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("default-branch", help="print the default branch")
     s.set_defaults(fn=cmd_default_branch)
+    s = sub.add_parser("repos", help="list the nested product repos from project.md ## Repos")
+    s.add_argument("slug", nargs="?"); s.add_argument("--log", action="store_true")
+    s.set_defaults(fn=cmd_repos)
     s = sub.add_parser("init-status", help="write a fresh status.md in the feature's worktree")
     s.add_argument("slug"); s.set_defaults(fn=cmd_init_status)
     s = sub.add_parser("status", help="print status, one key, or set keys")
