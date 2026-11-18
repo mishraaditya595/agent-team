@@ -200,3 +200,54 @@ def test_ensure_rerun_pushes_after_failed_push(ws):
     sh("git", "config", "--unset", "remote.origin.pushurl", cwd=ws / "app-flutter")
     assert at.main(["repos", "both", "--ensure"]) == 0
     assert sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=ws / "app-flutter")
+
+
+def test_commit_routes_paths_to_their_repos(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a"); (wt / "app-flutter/b.txt").write_text("b")
+    assert at.main(["commit", "both", "-m", "feat(both): T1", "app-backend/a.txt", "app-flutter/b.txt"]) == 0
+    assert sh("git", "log", "-1", "--format=%s", cwd=wt / "app-backend") == "feat(both): T1"
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-flutter") == ""
+
+
+def test_commit_refuses_workspace_path(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a"); (wt / "notes.md").write_text("n")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "notes.md"]) == 1
+    assert "notes.md is not inside a product repo" in capsys.readouterr().err
+    assert "a.txt" in sh("git", "status", "--porcelain", cwd=wt / "app-backend")   # nothing committed
+
+
+def test_heads_lists_each_repo(ws, capsys):
+    wt = new_ws_feature(ws); capsys.readouterr()
+    at.main(["heads", "both"])
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("app-backend:") and " app-flutter:" in out
+
+
+def test_lease_fails_when_product_branch_diverged(ws, tmp_path, capsys):
+    wt = new_ws_feature(ws)
+    o = tmp_path / "o"; sh("git", "clone", "-q", "-b", "feature/both", str(tmp_path / "backend.git"), str(o), cwd=tmp_path)
+    sh("git", "config", "user.email", "x@x", cwd=o); sh("git", "config", "user.name", "x", cwd=o)
+    (o / "r.txt").write_text("r"); sh("git", "add", "-A", cwd=o); sh("git", "commit", "-qm", "remote", cwd=o); sh("git", "push", "-q", cwd=o)
+    (wt / "app-backend/l.txt").write_text("l"); sh("git", "add", "-A", cwd=wt / "app-backend"); sh("git", "commit", "-qm", "local", cwd=wt / "app-backend")
+    assert at.main(["lease", "both", "acquire"]) == 1
+    assert "diverged" in capsys.readouterr().err
+
+
+def test_push_and_sync_cover_products(ws, tmp_path, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-flutter/c.txt").write_text("c"); at.main(["commit", "both", "-m", "c", "app-flutter/c.txt"])
+    assert at.main(["push", "both"]) == 0
+    assert sh("git", "rev-parse", "origin/feature/both", cwd=wt / "app-flutter") == sh("git", "rev-parse", "HEAD", cwd=wt / "app-flutter")
+    o = tmp_path / "o2"; sh("git", "clone", "-q", str(tmp_path / "backend.git"), str(o), cwd=tmp_path)
+    sh("git", "config", "user.email", "x@x", cwd=o); sh("git", "config", "user.name", "x", cwd=o)
+    (o / "m.txt").write_text("m"); sh("git", "add", "-A", cwd=o); sh("git", "commit", "-qm", "main moved", cwd=o); sh("git", "push", "-q", cwd=o)
+    capsys.readouterr()
+    assert at.main(["sync", "both"]) == 0
+    assert (wt / "app-backend/m.txt").exists()
+
+
+def test_parse_since():
+    assert at.parse_since("a:x b:y") == {"a": "x", "b": "y"}
+    assert at.parse_since("abc123") == "abc123" and at.parse_since(None) is None

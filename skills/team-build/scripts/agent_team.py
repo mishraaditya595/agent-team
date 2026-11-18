@@ -759,6 +759,9 @@ def cmd_lease(a):
     if not wt.exists():
         raise Fail(f"no worktree at {wt}")
     _catch_up(wt, branch)
+    for r in ws_repos(a.slug):
+        if r["wt"].exists():
+            _catch_up(r["wt"], branch)
     p = feature_dir(wt, a.slug) / "status.md"
     owner = read_status(p).get("owner", "none")
     host, _, when = owner.partition(" ")
@@ -933,45 +936,87 @@ def cmd_test(a):
     return 0
 
 
-def cmd_sync(a):
-    wt = worktree(a.slug)
-    d = default_branch()
-    dirty = git("status", "--porcelain", "--", ".", f":(exclude).agent-team/features/{a.slug}", cwd=wt)
+def _sync_one(wt, base, excludes, label=""):
+    """Merge origin/<base> into wt's branch; True when something was merged."""
+    dirty = git("status", "--porcelain", "--", ".", *excludes, cwd=wt)
     if dirty:
-        raise Fail("uncommitted changes in the worktree (not a merge conflict); commit or discard them first:\n"
+        raise Fail(f"{label}uncommitted changes in the worktree (not a merge conflict); commit or discard them first:\n"
                    + dirty)
-    git("fetch", "-q", "origin", d, cwd=wt)
-    if run(["git", "merge-base", "--is-ancestor", f"origin/{d}", "HEAD"], cwd=wt, check=False).returncode == 0:
-        print(f"up to date with origin/{d}")
-        return 0
-    r = run(["git", "merge", "--no-edit", f"origin/{d}"], cwd=wt, check=False)
+    git("fetch", "-q", "origin", base, cwd=wt)
+    if run(["git", "merge-base", "--is-ancestor", f"origin/{base}", "HEAD"], cwd=wt, check=False).returncode == 0:
+        return False
+    r = run(["git", "merge", "--no-edit", f"origin/{base}"], cwd=wt, check=False)
     if r.returncode:
         files = git("diff", "--name-only", "--diff-filter=U", cwd=wt, check=False)
         run(["git", "merge", "--abort"], cwd=wt, check=False)
         if not files:
-            raise Fail(f"merging origin/{d} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
-        raise Fail(f"merge conflict with origin/{d} in: {', '.join(files.split())}", code=2)
-    print(f"merged origin/{d}")
+            raise Fail(f"{label}merging origin/{base} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
+        raise Fail(f"{label}merge conflict with origin/{base} in: {', '.join(files.split())}", code=2)
+    return True
+
+
+def cmd_sync(a):
+    d = default_branch()
+    todo = [(worktree(a.slug), d, [f":(exclude).agent-team/features/{a.slug}"], "")]
+    todo += [(r["wt"], repo_branch(r), [], f"{r['path']}: ") for r in ws_repos(a.slug)]
+    for wt, base, excludes, label in todo:      # all merge or the first conflict stops the sync
+        print(f"{label}{'merged' if _sync_one(wt, base, excludes, label) else 'up to date with'} origin/{base}")
     return 0
 
 
-def cmd_push(a):
-    wt = worktree(a.slug)
-    branch = f"feature/{a.slug}"
+def _push_branch(wt, slug, branch, label=""):
     r = run(["git", "push", "-u", "origin", branch], cwd=wt, check=False)
     if r.returncode == 0:
-        print(f"pushed {branch}")
-        return 0
+        print(f"{label}pushed {branch}")
+        return
     if REFUSED.search(r.stderr or ""):
-        raise Fail(f"push refused by the server (branch protection or a hook on {branch}): {_refusal(r)}. "
+        raise Fail(f"{label}push refused by the server (branch protection or a hook on {branch}): {_refusal(r)}. "
                    f"agent-team needs to push feature/* branches; check the repo's rules.")
     if not REJECTED.search(r.stderr or ""):
-        raise Fail(f"push failed (network, sign-in or permissions?): {_last_line(r)}")
+        raise Fail(f"{label}push failed (network, sign-in or permissions?): {_last_line(r)}")
     git("fetch", "-q", "origin", branch, cwd=wt, check=False)
-    rs = run(["git", "show", f"origin/{branch}:.agent-team/features/{a.slug}/status.md"], cwd=wt, check=False)
+    rs = run(["git", "show", f"origin/{branch}:.agent-team/features/{slug}/status.md"], cwd=wt, check=False)
     owner = read_status_text(rs.stdout).get("owner", "unknown") if rs.returncode == 0 else "unknown"
-    raise Fail(f"push rejected: {branch} has commits from elsewhere ({_last_line(r)}). Remote owner: {owner}. "
+    raise Fail(f"{label}push rejected: {branch} has commits from elsewhere ({_last_line(r)}). Remote owner: {owner}. "
                f"Never force-push; stop and tell the owner.", code=3)
+
+
+def cmd_push(a):
+    branch = f"feature/{a.slug}"
+    for r in ws_repos(a.slug):      # products first, so the workspace branch never points at unpushed work
+        _push_branch(r["wt"], a.slug, branch, f"{r['path']}: ")
+    _push_branch(worktree(a.slug), a.slug, branch)
+    return 0
+
+
+def cmd_commit(a):
+    rs = ws_repos(a.slug)
+    if not rs:
+        raise Fail("commit is for workspace features; use git commit")
+    by = {}
+    for p in a.paths:
+        r = next((r for r in rs if p.startswith(r["path"] + "/")), None)
+        if not r:
+            raise Fail(f"{p} is not inside a product repo of {a.slug}")
+        by.setdefault(r["path"], []).append(p[len(r["path"]) + 1:])
+    for r in rs:
+        if r["path"] in by:
+            git("add", "--", *by[r["path"]], cwd=r["wt"])
+            git("commit", "-q", "-m", a.message, cwd=r["wt"])
+            print(f"committed {r['path']} {git('rev-parse', '--short', 'HEAD', cwd=r['wt'])}")
+
+
+def cmd_heads(a):
+    rs = ws_repos(a.slug)
+    print(" ".join(f"{r['path']}:{git('rev-parse', '--short', 'HEAD', cwd=r['wt'])}" for r in rs)
+          if rs else git("rev-parse", "--short", "HEAD", cwd=worktree(a.slug)))
+
+
+def parse_since(since):
+    """`a:x b:y` -> {"a": "x", "b": "y"}; a plain sha stays a string."""
+    if since and ":" in since:
+        return dict(t.split(":", 1) for t in since.split())
+    return since
 
 
 def cmd_idea(a):
@@ -1517,6 +1562,11 @@ def build_parser():
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_test)
     s = sub.add_parser("sync", help="merge the default branch into the feature branch")
     s.add_argument("slug"); s.set_defaults(fn=cmd_sync)
+    s = sub.add_parser("commit", help="workspace features: commit paths into their product repos")
+    s.add_argument("slug"); s.add_argument("-m", "--message", required=True); s.add_argument("paths", nargs="+")
+    s.set_defaults(fn=cmd_commit)
+    s = sub.add_parser("heads", help="short HEAD per repo (workspace) or of the worktree")
+    s.add_argument("slug"); s.set_defaults(fn=cmd_heads)
     s = sub.add_parser("push", help="push the feature branch; explains a rejection")
     s.add_argument("slug"); s.set_defaults(fn=cmd_push)
     s = sub.add_parser("idea", help="print or set an idea's status")
