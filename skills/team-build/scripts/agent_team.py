@@ -557,7 +557,9 @@ def idea_info(slug):
         if block:
             st = re.search(r"\*\*Status:\*\*\s*(\w+)", block)
             eff = re.search(r"\*\*Effort:\*\*\s*([SML])", block)
-            return {"status": st.group(1) if st else "proposed", "effort": eff.group(1) if eff else None}
+            rp = re.search(r"\*\*Repos:\*\*[ \t]*(.+)", block)
+            repos = [r.strip() for r in rp.group(1).split(",") if r.strip()] if rp else []
+            return {"status": st.group(1) if st else "proposed", "effort": eff.group(1) if eff else None, "repos": repos}
     raise Fail(f"unknown slug '{slug}': not in .agent-team/ideas.md")
 
 

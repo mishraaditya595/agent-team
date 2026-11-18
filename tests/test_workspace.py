@@ -131,3 +131,7 @@ def test_unignored_nested_repo_not_detected(ws):
 def test_allow_list_covers_repo_commands():
     allow = at.merged_allow([], WS_PROJECT)
     assert "Bash(test -f api.txt:*)" in allow and "Bash(test -f ui.txt:*)" in allow
+
+
+def test_idea_info_repos(ws):
+    assert at.idea_info("both")["repos"] == ["app-backend", "app-flutter"]

@@ -507,3 +507,9 @@ def test_audit_date_comes_from_report_name():
     assert "today's date" not in wf and "date in the report file name" in wf
     assert "date in the report file name" in read("skills/tech-lead/SKILL.md")
     assert "team-audit [quick\\|deep] [<category>]" in read("README.md")
+
+
+def test_pm_ideates_across_repos():
+    pm = read("skills/pm/SKILL.md")
+    assert "agent-team repos --log" in pm and "**Repos:**" in pm
+    assert "**Repos:**" in read("skills/pm/references/ideas-template.md")
