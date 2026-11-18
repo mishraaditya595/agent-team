@@ -56,7 +56,7 @@ Each part leaves single-repo behaviour byte-identical.
 
 - Setting: a line `- docs-push: pr-only` in `project.md` `## Conventions`. Absent or any other value → today's behaviour.
 - `cmd_docs_commit`: when set, call `_docs_attempt(..., to_meta=True)` from the first attempt. That is the only path that pushes to a default branch today (`agent_team.py` `_docs_attempt`; feature pushes go to `feature/*`, cleanup only deletes branches), so this satisfies the acceptance line.
-- `project.md` itself is read via `read_doc` (newest of checkout / `agent-team/meta`), so a freshly set `pr-only` on an unmerged meta PR still applies.
+- `read_doc` returns `agent-team/meta`'s copy if live, else the checkout, else `origin/<default>` — so a stale checkout hides a setting already on `origin/<default>`. `docs-commit` therefore checks both `read_doc` and `origin/<default>`; either one turns `pr-only` on (so turning it off needs a merged change).
 - Mention the setting in `project-template.md` (commented example) and `team-init` step 5 wording.
 - Test: with `pr-only` and an unprotected default branch, `docs-commit` pushes to `agent-team/meta` and opens/reuses the PR; without it, behaviour unchanged.
 
@@ -97,7 +97,7 @@ Workspace mode ⇔ `project.md` has a `## Repos` section with at least one `### 
 
 - Step 3: detect nested repos (`git -C <dir> rev-parse --show-toplevel` equals `<dir>` for each top-level dir, depth 1) that are gitignored by the workspace. If any, draft `## Repos` (one subsection per repo, commands filled from that repo's manifests/CI like today) and `## Cross-repo rules` (`unknown — owner to fill`).
 - Nothing is written into product repos. `.agent-team/` and `.claude/settings.json` are committed to the workspace (that is where Claude is launched and where memory lives). Settings get `Bash(<cmd>:*)` entries for every repo's commands.
-- `agent-team upgrade` adds `## Repos` / `## Cross-repo rules` only when nested repos are detected. This needs a special case: `add_missing_sections()` adds every template heading a `project.md` lacks, so these two must not be plain headings in `project-template.md` (keep them as a commented example) or be skipped explicitly — otherwise every single-repo project gains them.
+- `agent-team upgrade` adds `## Repos` / `## Cross-repo rules` only when nested repos are detected. This needs a special case: `add_missing_sections()` adds every template heading a `project.md` lacks, so `upgrade` must skip these two explicitly unless nested repos are detected. Don't rely on keeping them as a commented example in `project-template.md`: `_headings()` and `section_raw()` read the raw template without stripping `<!-- -->`, so a commented `## Repos` would still be added (with a stray `-->`) and switch the project into workspace mode.
 
 ### PM ideation
 

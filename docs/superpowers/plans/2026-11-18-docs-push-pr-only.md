@@ -34,7 +34,7 @@
 - Test: `tests/test_docs_pr_only.py` (new)
 
 **Interfaces:**
-- Produces: `docs_pr_only(text: str | None = None) -> bool` — `True` iff `## Conventions` of `text` (default: `read_doc(".agent-team/project.md")`, `None` → `False`) has a non-comment line matching `^\s*-\s*docs-push:\s*pr-only\b`, case-insensitive.
+- Produces: `docs_pr_only(text: str | None) -> bool` — `True` iff `## Conventions` of `text` (`None` → `False`) has a non-comment line matching `^\W*docs[-_ ]?push\W*pr[-_ ]?only\b`, case-insensitive. Caller passes `read_doc(".agent-team/project.md")` and `show("origin/<d>", …)`. (As built; see review fixes.)
 
 - [ ] **Step 1: Write the failing tests** in `tests/test_docs_pr_only.py`, importing `at, repo, sh` from `test_agent_team` (main stays unprotected throughout):
 
@@ -72,7 +72,7 @@ def test_docs_pr_only_parsing():
     assert not at.docs_pr_only(None)
 ```
 
-Plus `test_pr_only_set_on_meta_applies`: push `project.md` with the setting to `agent-team/meta` only (temp clone, `git push origin HEAD:agent-team/meta`), fetch in `repo`, then `docs-commit` an idea → output contains `pushed to agent-team/meta`.
+Dropped at execution: `test_pr_only_set_on_meta_applies` passes without the change (meta with newer docs already routes to meta), so it can't test this feature. Originally: push `project.md` with the setting to `agent-team/meta` only (temp clone, `git push origin HEAD:agent-team/meta`), fetch in `repo`, then `docs-commit` an idea → output contains `pushed to agent-team/meta`.
 
 - [ ] **Step 2: Run to verify they fail**
 

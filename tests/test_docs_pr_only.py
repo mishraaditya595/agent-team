@@ -61,3 +61,12 @@ def test_pr_only_pasted_with_markup_still_applies():
     base = "# x\n\n## Conventions\n{}\n"
     assert at.docs_pr_only(base.format("`- docs-push: pr-only`"))
     assert at.docs_pr_only(base.format("- **docs-push:** `pr-only`"))
+
+
+def test_pr_only_other_list_styles_still_apply():
+    base = "# x\n\n## Conventions\n{}\n"
+    for line in ("* docs-push: pr-only", "+ docs-push: pr-only", "docs-push: pr-only",
+                 "- docs-push: pr_only", "- Docs push: pr only"):
+        assert at.docs_pr_only(base.format(line)), line
+    assert not at.docs_pr_only(base.format("- docs-push: direct"))
+    assert not at.docs_pr_only(base.format("- no docs-push here, pr-only reviews are a team habit"))

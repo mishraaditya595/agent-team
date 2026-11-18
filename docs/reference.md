@@ -30,7 +30,7 @@ Anytime: `team-market --topic "<idea, plan path or topic>" [--channels instagram
 
 **Set up with an earlier version?** Merge the update, re-run `install.sh`, then run `team-init upgrade` in each product repo — it adds the new `project.md` sections and permissions without touching what you wrote.
 
-If `main` is branch-protected (or `project.md` `## Conventions` has `- docs-push: pr-only`, for owners who want every agent push reviewed), `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own. While a meta PR is open, the workflows also put its newer docs into your checkout as uncommitted copies; to update `main` in that repo, use **`agent-team pull`** rather than `git pull` — it puts back copies nobody edited, so the fast-forward works after a squash merge (manual fix if needed: `git checkout -- .agent-team`). Merge the setup PR before the first `team-build`.
+If `main` is branch-protected (or `project.md` `## Conventions` has `- docs-push: pr-only`, for owners who want every agent-team docs push reviewed), `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own. While a meta PR is open, the workflows also put its newer docs into your checkout as uncommitted copies; to update `main` in that repo, use **`agent-team pull`** rather than `git pull` — it puts back copies nobody edited, so the fast-forward works after a squash merge (manual fix if needed: `git checkout -- .agent-team`). Merge the setup PR before the first `team-build`.
 
 ## The helper CLI
 

@@ -305,8 +305,8 @@ def project_command(name, text=None):
 def docs_pr_only(text):
     """project.md ## Conventions has `- docs-push: pr-only`: docs never go straight to the default branch.
     text None (no project.md yet) → False."""
-    # Backticks / bold around key or value are tolerated: a pasted example must not silently stay off.
-    pat = r"^[\s`*]*-\s*[`*]*docs-push:[`*]*\s*[`*]*pr-only\b"
+    # Lenient on purpose (any bullet, backticks, bold, `pr_only`): a mistyped line must not silently stay off.
+    pat = r"^\W*docs[-_ ]?push\W*pr[-_ ]?only\b"
     return bool(text) and bool(re.search(pat, section(text, "Conventions"), re.M | re.I))
 
 
