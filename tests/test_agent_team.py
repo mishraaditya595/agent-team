@@ -1,4 +1,5 @@
 """Behaviour of the agent-team helper CLI against throwaway git repos."""
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -385,3 +386,95 @@ def test_pr_body_without_decisions_has_no_section(repo, capsys):
 def test_marketing_topic_tier_needs_no_slug(repo, capsys):
     r = tier(capsys, "marketing-topic")
     assert r["tier"] == "standard" and r["model"] == "sonnet"
+
+
+def test_tier_audit(repo, capsys):
+    deep = tier(capsys, "tech-lead-audit")
+    assert deep["tier"] == "deep" and deep["model"] == "opus" and "audit" in deep["reason"]
+    quick = tier(capsys, "tech-lead-audit-quick", "--tool", "codex")
+    assert quick["tier"] == "standard" and quick["model"] == "gpt-5.4"
+
+
+def test_drift(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: {base}")
+                                + "\n## Files\n- `app.txt` — modify — x\n- `lib/*.py` — create — glob\n")
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: none"
+    (repo / "app.txt").write_text("changed\n")
+    sh("git", "commit", "-qam", "upstream", cwd=repo); sh("git", "push", "-q", cwd=repo)
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: app.txt"
+    (fd / "plan.md").write_text(PLAN)
+    assert at.main(["drift", "tiny"]) == 0                       # unstamped: skip, never stop
+    assert capsys.readouterr().out.startswith("drift: unchecked (no planned-at")
+
+
+def test_drift_backticked_and_unknown_sha(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    files = "\n## Files\n- `app.txt` — modify — x\nplain line, no backticks\n"
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: `{base}`") + files)
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: none"
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", "qa-ui: no · planned-at: deadbee") + files)
+    assert at.main(["drift", "tiny"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("drift: unchecked (") and "deadbee" in out
+
+
+def test_audit_path(repo, capsys):
+    capsys.readouterr()
+    assert at.main(["audit-path", "--date", "2026-11-17"]) == 0
+    assert capsys.readouterr().out.strip() == "path: .agent-team/audits/2026-11-17.md"
+    sh("git", "checkout", "-q", "-b", "agent-team/meta", cwd=repo)
+    (repo / ".agent-team" / "audits").mkdir()
+    (repo / ".agent-team" / "audits" / "2026-11-17.md").write_text("# Audit\n")
+    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "audit", cwd=repo)
+    sh("git", "push", "-q", "origin", "agent-team/meta", cwd=repo)
+    sh("git", "checkout", "-q", "main", cwd=repo)
+    (repo / ".agent-team" / "audits").mkdir()
+    (repo / ".agent-team" / "audits" / "2026-11-17-2.md").write_text("local\n")
+    assert at.main(["audit-path", "--date", "2026-11-17"]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0] == "path: .agent-team/audits/2026-11-17-3.md"
+    assert "earlier: origin/agent-team/meta:.agent-team/audits/2026-11-17.md" in lines
+    assert "earlier: .agent-team/audits/2026-11-17-2.md" in lines
+
+
+def test_drift_reads_every_path_on_a_line(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: {base}")
+                                + "\n## Files\n- `x.txt`, `app.txt` — modify — both\n* `y.txt` — star bullet\n")
+    (repo / "app.txt").write_text("changed\n")
+    sh("git", "commit", "-qam", "upstream", cwd=repo); sh("git", "push", "-q", cwd=repo)
+    assert at.main(["drift", "tiny"]) == 0
+    assert capsys.readouterr().out.strip() == "drift: app.txt"
+    assert at.plan_files("## Files\n* `y.txt` — x\n- `a.py`, `b.py` — y\n- `lib/*.py` — glob\n") == ["y.txt", "a.py", "b.py"]
+
+
+def test_audit_path_rejects_bad_date(repo, capsys):
+    assert at.main(["audit-path", "--date", "../x"]) == 1
+    assert "YYYY-MM-DD" in capsys.readouterr().err
+
+
+def test_upgrade_marks_intent_docs_unknown(repo, capsys):
+    pm = repo / ".agent-team" / "project.md"
+    pm.write_text(re.sub(r"^## Intent docs\n.*?(?=^## )", "", pm.read_text(), flags=re.M | re.S))
+    assert "## Intent docs" not in pm.read_text()
+    assert at.main(["upgrade"]) == 0
+    body = at.section_raw(pm.read_text(), "Intent docs")
+    assert "unknown — owner to fill" in body and "\nnone" not in body
+
+
+def test_drift_without_plan_or_files(repo, capsys):
+    wt, fd = new_feature(repo, capsys=capsys)
+    base = sh("git", "rev-parse", "--short", "origin/main", cwd=wt)
+    (fd / "plan.md").write_text(PLAN.replace("qa-ui: no", f"qa-ui: no · planned-at: {base}"))
+    assert at.main(["drift", "tiny"]) == 0              # stamped, but nothing to watch: say so, don't claim "none"
+    assert capsys.readouterr().out.startswith("drift: unchecked (no paths in ## Files")
+    (fd / "plan.md").unlink()
+    assert at.main(["drift", "tiny"]) == 1
+    assert "plan.md is missing" in capsys.readouterr().err

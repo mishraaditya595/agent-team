@@ -43,8 +43,10 @@ GENERATED = ("*.g.dart", "*.freezed.dart", "*.mocks.dart", "*.gr.dart", "*.pb.go
              "*.min.css", "*.map")
 CHECKBOX = re.compile(r"^\s*- \[( |x|X)\]")
 TASK_LINE = re.compile(r"^\s*- \[( |x|X)\] (T\d+)\b(?:\s+\[([^\]]*)\])?", re.I)
-ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm", "marketing-topic": "marketing"}
-ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "developer", "reviewer", "qa", "marketing", "marketing-topic")
+ROLE_SKILL = {"pm-spec": "pm", "pm-ideate": "pm", "pm-intake": "pm", "marketing-topic": "marketing",
+              "tech-lead-audit": "tech-lead", "tech-lead-audit-quick": "tech-lead"}
+ROLES = ("pm-ideate", "pm-intake", "pm-spec", "tech-lead", "tech-lead-audit", "tech-lead-audit-quick",
+         "developer", "reviewer", "qa", "marketing", "marketing-topic")
 
 
 class Fail(Exception):
@@ -422,11 +424,33 @@ def plan_tasks(plan):
     return out
 
 
+def planned_at(plan):
+    m = re.search(r"planned-at:\s*`?([0-9a-f]{7,40})\b", plan)
+    return m.group(1) if m else None
+
+
+def plan_files(plan):
+    """Every backticked path on the bullet ('-' or '*') lines of plan.md's ## Files; globs are skipped."""
+    out = []
+    for line in section(plan, "Files").splitlines():
+        if not re.match(r"\s*[-*]\s", line):
+            continue
+        for p in re.findall(r"`([^`]+)`", line.split(" — ", 1)[0]):
+            p = re.sub(r":\d+(-\d+)?$", "", p.strip())
+            if p and "*" not in p and p not in out:
+                out.append(p)
+    return out
+
+
 def rule_tier(role, slug, task=None, escalate=False):
     """The tier rules from the team-build skill. Returns (tier, reason)."""
     base = work_dir(slug) if slug else repo_root()
     fd = feature_dir(base, slug) if slug else None
     read = lambda name: (fd / name).read_text() if fd and (fd / name).exists() else ""
+    if role == "tech-lead-audit":
+        return "deep", "audit"
+    if role == "tech-lead-audit-quick":
+        return "standard", "quick audit"
     if role == "pm-ideate":
         return "deep", "ideation"
     if role == "pm-intake":
@@ -669,7 +693,7 @@ def cmd_lease(a):
 
 def cmd_tier(a):
     tool = a.tool or os.environ.get("AGENT_TEAM_TOOL", "claude")
-    if not a.slug and a.role not in ("pm-ideate", "pm-intake", "marketing-topic"):
+    if not a.slug and a.role not in ("pm-ideate", "pm-intake", "marketing-topic", "tech-lead-audit", "tech-lead-audit-quick"):
         raise Fail(f"tier {a.role} needs the feature slug: agent-team tier {a.role} <slug>")
     r = pick(a.role, a.slug, tool, a.task, a.escalate)
     print(f"tier={r['tier']} model={r['model']} effort={r['effort']} reason={r['reason']}")
@@ -694,6 +718,60 @@ def cmd_tasks(a):
         print("all tasks done")
     for tier, ids in todo:
         print(f"{tier} {','.join(ids)}")
+
+
+def cmd_drift(a):
+    wt = work_dir(a.slug)
+    plan = feature_dir(wt, a.slug) / "plan.md"
+    if not plan.exists():
+        raise Fail(f"{plan} is missing")
+    text = plan.read_text()
+    sha = planned_at(text)
+    if not sha:
+        print("drift: unchecked (no planned-at line in plan.md; written before drift checks)")
+        return 0
+    files = plan_files(text)
+    if not files:
+        print("drift: unchecked (no paths in ## Files to watch)")
+        return 0
+    d = default_branch()
+    git("fetch", "-q", "origin", d, cwd=wt)
+    if run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=wt, check=False).returncode:
+        print(f"drift: unchecked (planned-at {sha} isn't in this clone — shallow clone or rewritten history)")
+        return 0
+    changed = git("diff", "--name-only", sha, f"origin/{d}", "--", *files, cwd=wt).split()
+    print(f"drift: {', '.join(changed) if changed else 'none'}")
+    return 0
+
+
+def cmd_audit_path(a):
+    """Next free .agent-team/audits/<date>[-n].md, checking the checkout, origin/<default> and origin/agent-team/meta,
+    plus every earlier audit report as a path or a <ref>:<path> for `git show`."""
+    root = repo_root()
+    d = default_branch(root)
+    rel_dir = ".agent-team/audits"
+    taken, earlier = set(), []
+    local = root / rel_dir
+    for f in sorted(local.glob("*.md")) if local.is_dir() else []:
+        rel = f"{rel_dir}/{f.name}"
+        taken.add(rel); earlier.append(rel)
+    for ref in (f"origin/{d}", f"origin/{META}"):
+        if not git("rev-parse", "--verify", "-q", f"refs/remotes/{ref}", cwd=root, check=False):
+            continue
+        for rel in git("ls-tree", "-r", "--name-only", ref, "--", rel_dir, cwd=root, check=False).splitlines():
+            if rel.endswith(".md") and rel not in taken:
+                taken.add(rel); earlier.append(f"{ref}:{rel}")
+    date = a.date or now_utc().strftime("%Y-%m-%d")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise Fail(f"--date must be YYYY-MM-DD, got {date!r}")
+    path, n = f"{rel_dir}/{date}.md", 1
+    while path in taken:
+        n += 1
+        path = f"{rel_dir}/{date}-{n}.md"
+    print(f"path: {path}")
+    for e in earlier:
+        print(f"earlier: {e}")
+    return 0
 
 
 def cmd_next(a):
@@ -1184,6 +1262,8 @@ def add_missing_sections(text, template, owner="unknown — owner to fill"):
         if h.lower() in have:
             continue
         body = owner if h.lower() == "owner" else section_raw(template, h)
+        if h.lower() == "intent docs":            # an older repo may well have ADRs/PRDs: ask, don't claim none
+            body = re.sub(r"^none$", "unknown — owner to fill", body, flags=re.M)
         if body.startswith("<") and not body.startswith("<!--"):
             body = "unknown — owner to fill"
         block = f"## {h}\n{body}\n\n"
@@ -1289,6 +1369,10 @@ def build_parser():
     s.add_argument("--tool", choices=["claude", "codex", "gemini", "other"]); s.set_defaults(fn=cmd_tier)
     s = sub.add_parser("tasks", help="unticked plan tasks, batched by tier")
     s.add_argument("slug"); s.set_defaults(fn=cmd_tasks)
+    s = sub.add_parser("drift", help="files in plan.md changed on the default branch since planned-at")
+    s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
+    s = sub.add_parser("audit-path", help="next free audit report path, and earlier audit reports")
+    s.add_argument("--date", help="YYYY-MM-DD (default: today, UTC)"); s.set_defaults(fn=cmd_audit_path)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
     s.add_argument("slug"); s.add_argument("kind", choices=["review", "qa"]); s.set_defaults(fn=cmd_next)
     s = sub.add_parser("diff", help="feature diff without .agent-team/, lockfiles and generated code")

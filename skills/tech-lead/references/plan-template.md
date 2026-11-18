@@ -1,6 +1,6 @@
 # Plan: <title>
 
-spec: `.agent-team/features/<slug>/spec.md` · modelled on: <existing feature/path> · qa-ui: yes|no
+spec: `.agent-team/features/<slug>/spec.md` · modelled on: <existing feature/path> · qa-ui: yes|no · planned-at: <short sha of `git merge-base HEAD origin/<default>`>
 
 <!-- qa-ui: yes if any AC can only be checked by driving the UI (browser, emulator); QA then runs on the standard tier. -->
 
