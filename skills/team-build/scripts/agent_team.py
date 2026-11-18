@@ -311,9 +311,12 @@ def project_command(name, text=None):
 def repos(text=None):
     """Nested product repos from project.md ## Repos ([] = single-repo), `- Order:` in ## Cross-repo rules first."""
     text = project_md() if text is None else text
-    parts = re.split(r"^###\s+(\S+)\s*$", section(text, "Repos"), flags=re.M)[1:]
+    parts = re.split(r"^###\s+(.+?)\s*$", section(text, "Repos"), flags=re.M)[1:]
     out = []
-    for path, body in zip(parts[::2], parts[1::2]):
+    for heading, body in zip(parts[::2], parts[1::2]):
+        path = heading.split()[0]
+        if path.startswith("/") or "/" in path or ".." in path:
+            raise Fail(f"project.md ## Repos: '### {heading}' must be a repo directory directly under the workspace root")
         f = lambda k: (m.group(1).strip() if (m := re.search(rf"^\s*-\s*{k}:\s*(.+)$", body, re.M | re.I)) else None)
         out.append({"path": path, "role": f("Role") or "", "branch": f("Branch"), "body": body})
     m = re.search(r"^\s*-\s*Order:\s*(.+)$", section(text, "Cross-repo rules"), re.M | re.I)
@@ -659,10 +662,13 @@ def ensure_repo_worktrees(slug):
         if run(["git", "check-ignore", "-q", f"{r['path']}/"], cwd=wt, check=False).returncode:
             raise Fail(f"{r['path']} is not gitignored by the workspace; add /{r['path']}/ to .gitignore")
         local = run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"], cwd=src, check=False).returncode == 0
+        git("worktree", "prune", cwd=src)     # a removed worktree dir still registers the branch as checked out
         if git("ls-remote", "--heads", "origin", branch, cwd=src):
             git("fetch", "-q", "origin", branch, cwd=src)
             git("worktree", "add", "-q", *(() if local else ("--track", "-b", branch)), str(dest),
                 *((branch,) if local else (f"origin/{branch}",)), cwd=src)
+            if local:       # the local branch may be behind what another machine pushed
+                _catch_up(dest, branch)
         else:
             base = repo_branch(r)
             git("fetch", "-q", "origin", base, cwd=src)
@@ -1025,18 +1031,23 @@ def cmd_commit(a):
         raise Fail("commit is for workspace features; use git commit")
     by = {}
     for p in a.paths:
+        p = os.path.relpath(Path(p).resolve(), worktree(a.slug).resolve()) if p.startswith("/") else os.path.normpath(p)
         r = next((r for r in rs if p.startswith(r["path"] + "/")), None)
         if not r:
             raise Fail(f"{p} is not inside a product repo of {a.slug}")
         by.setdefault(r["path"], []).append(p[len(r["path"]) + 1:])
     touched = [r for r in rs if r["path"] in by]
+    staged = []
     try:
         for r in touched:       # stage everywhere first: a bad path fails before anything is committed
+            staged.append(r)
             git("add", "--", *by[r["path"]], cwd=r["wt"])
         for r in touched:
             git("commit", "-q", "-m", a.message, cwd=r["wt"])
             print(f"committed {r['path']} {git('rev-parse', '--short', 'HEAD', cwd=r['wt'])}")
     except Fail as e:
+        for s in staged:        # don't leave earlier repos' paths staged for the next commit to sweep in
+            git("reset", "-q", "--", *by[s["path"]], cwd=s["wt"], check=False)
         raise Fail(f"{r['path']}: {e}", code=e.code)
 
 
@@ -1243,8 +1254,8 @@ def merged_pr_head(pr, cwd, repo=None):
     return oid if r.returncode == 0 and state == "MERGED" and oid else None
 
 
-def _cleanup_problems(root, wt, branch, pr_head, remote):
-    """What removing wt and branch (of the repo at root) would lose."""
+def _cleanup_problems(root, wt, branch, pr_head, remote, base=None):
+    """What removing wt and branch (of the repo at root) would lose; base = the branch it merges into."""
     problems = []
     if wt.exists() and git("status", "--porcelain", cwd=wt):
         problems.append(f"uncommitted changes in {wt} — commit or discard them")
@@ -1255,7 +1266,7 @@ def _cleanup_problems(root, wt, branch, pr_head, remote):
     remote_tip = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False)
     if remote and remote_tip:
         try:
-            in_default = _is_ancestor(remote_tip, f"origin/{default_branch(root)}", root)
+            in_default = _is_ancestor(remote_tip, f"origin/{base or default_branch(root)}", root)
         except Fail:
             in_default = False
         if remote_tip != pr_head and not in_default:
@@ -1264,9 +1275,9 @@ def _cleanup_problems(root, wt, branch, pr_head, remote):
     return problems
 
 
-def _cleanup_one(root, wt, branch, pr_head, remote, force):
+def _cleanup_one(root, wt, branch, pr_head, remote, force, base=None):
     """Check (unless force), then remove wt and the local (and with remote, origin's) branch of the repo at root."""
-    problems = _cleanup_problems(root, wt, branch, pr_head, remote)
+    problems = _cleanup_problems(root, wt, branch, pr_head, remote, base)
     if problems and not force:
         raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's really "
                    "what you want.")
@@ -1292,17 +1303,18 @@ def cmd_cleanup(a):
     units = []
     for r in ws_repos(a.slug, ready=False):
         git("fetch", "-q", "--prune", "origin", cwd=r["src"], check=False)
-        units.append((r["path"], r["src"], r["wt"], merged_pr_head(rps.get(r["path"]), r["src"], gh_slug(r["src"]))))
+        units.append((r["path"], r["src"], r["wt"], merged_pr_head(rps.get(r["path"]), r["src"], gh_slug(r["src"])),
+                      repo_branch(r)))
     git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
-    units.append((None, root, worktree(a.slug), merged_pr_head(pr, root)))
+    units.append((None, root, worktree(a.slug), merged_pr_head(pr, root), None))
     if not a.force:   # check every repo before removing anything
-        problems = [f"{label}: {p}" if label else p for label, src, wt, head in units
-                    for p in _cleanup_problems(src, wt, branch, head, a.remote)]
+        problems = [f"{label}: {p}" if label else p for label, src, wt, head, base in units
+                    for p in _cleanup_problems(src, wt, branch, head, a.remote, base)]
         if problems:
             raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's "
                        "really what you want.")
-    for _, src, wt, head in units:
-        _cleanup_one(src, wt, branch, head, a.remote, a.force)
+    for _, src, wt, head, base in units:
+        _cleanup_one(src, wt, branch, head, a.remote, a.force, base)
 
 
 # ---------- docs commits (never on the local default branch) ----------

@@ -386,3 +386,81 @@ def test_pr_body_single_repo_without_status_md(repo, capsys):
     sh("git", "worktree", "add", "-q", "-b", "feature/x", str(wt), "origin/main", cwd=repo)
     assert at.main(["pr-body", "x", "--summary", "s"]) == 0
     assert "## Summary" in capsys.readouterr().out
+
+
+# ---------- PR #10 review fixes ----------
+
+def test_repos_heading_with_trailing_words():
+    t = WS_PROJECT.replace("### app-backend\n", "### app-backend — API server\n").replace(
+        "### app-flutter\n", "### app-flutter — mobile app\n")
+    rs = at.repos(t)
+    assert [r["path"] for r in rs] == ["app-backend", "app-flutter"]
+    assert rs[0]["branch"] is None and rs[1]["branch"] == "main"
+    assert at.block_command("Test", rs[0]["body"]) == "test -f api.txt"
+
+
+@pytest.mark.parametrize("bad", ["../x", "a/b", "/abs"])
+def test_repos_rejects_non_depth_one_path(bad):
+    with pytest.raises(at.Fail, match=bad):
+        at.repos(WS_PROJECT.replace("### app-backend\n", f"### {bad}\n"))
+
+
+def test_ensure_fast_forwards_stale_local_branch(ws):
+    wt = new_ws_feature(ws)
+    other = wt / "app-backend"
+    (other / "new.txt").write_text("x")
+    sh("git", "add", "-A", cwd=other); sh("git", "commit", "-qm", "work", cwd=other)
+    sh("git", "push", "-q", cwd=other)
+    sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=other)     # local branch is now stale
+    sh("git", "worktree", "remove", "--force", str(other), cwd=ws / "app-backend")
+    assert at.main(["repos", "both", "--ensure"]) == 0
+    assert (other / "new.txt").exists()
+
+
+def test_cleanup_remote_checks_product_base_branch(ws):
+    p = ws / ".agent-team" / "project.md"
+    p.write_text(p.read_text().replace("- Role: API\n", "- Role: API\n- Branch: develop\n"))
+    sh("git", "commit", "-qam", "develop", cwd=ws); sh("git", "push", "-q", cwd=ws)
+    be = ws / "app-backend"
+    sh("git", "checkout", "-q", "-b", "develop", cwd=be); sh("git", "push", "-q", "-u", "origin", "develop", cwd=be)
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt"]) == 0
+    sh("git", "push", "-q", cwd=wt / "app-backend")
+    sh("git", "merge", "-q", "--ff-only", "feature/both", cwd=be)       # merged into develop, no PR
+    sh("git", "push", "-q", "origin", "develop", cwd=be)
+    sh("git", "checkout", "-q", "main", cwd=be)
+    sh("git", "commit", "-q", "--allow-empty", "-m", "main moves", cwd=be)  # develop != main
+    sh("git", "push", "-q", "origin", "main", cwd=be)
+    sh("git", "commit", "-qam", "status", cwd=wt); sh("git", "push", "-q", cwd=wt)
+    sh("git", "merge", "-q", "--ff-only", "origin/feature/both", cwd=ws); sh("git", "push", "-q", "origin", "main", cwd=ws)
+    assert at.main(["cleanup", "both", "--remote"]) == 0
+    assert not sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=be)
+
+
+def test_cleanup_remote_happy_path_after_merge(ws):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt"]) == 0
+    sh("git", "commit", "-qam", "status", cwd=wt)
+    assert at.main(["push", "both"]) == 0
+    for d, b in ((ws / "app-backend", "main"), (ws / "app-flutter", "main"), (ws, "main")):
+        sh("git", "fetch", "-q", cwd=d)
+        sh("git", "merge", "-q", "--ff-only", "origin/feature/both", cwd=d)
+        sh("git", "push", "-q", "origin", b, cwd=d)
+    assert at.main(["cleanup", "both", "--remote"]) == 0
+
+
+def test_commit_accepts_dot_slash_and_absolute_paths(ws):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a"); (wt / "app-flutter/b.txt").write_text("b")
+    assert at.main(["commit", "both", "-m", "x", "./app-backend/a.txt", str(wt / "app-flutter/b.txt")]) == 0
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-backend") == ""
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-flutter") == ""
+
+
+def test_commit_staging_failure_unstages_earlier_repos(ws):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "app-flutter/typo.txt"]) == 1
+    assert sh("git", "diff", "--cached", "--name-only", cwd=wt / "app-backend") == ""
