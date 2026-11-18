@@ -527,4 +527,9 @@ def test_workspace_mode_wired_in_skills():
     assert '"last_reviewed_commit=$(agent-team heads <slug>)"' in tb and tb.count("last_reviewed_commit=$(") == 3
     assert '--since "<since>"' in read("skills/reviewer/SKILL.md")
     assert tb.index("If it's rejected") < tb.index("Otherwise, in a workspace, run")
-    assert "git -C" not in tb + read("skills/developer/SKILL.md")
+    assert "then always run `agent-team repos <slug> --ensure`" in tb
+    assert "`<owner/repo>` = `repo=` and `<branch>` = `branch=`" in tb and "--log-failed`, with `-R <owner/repo>`" in tb
+    assert "-R <owner/repo> --json number" in tb
+    assert "plain `git add`/`git commit`" in read("skills/developer/SKILL.md")
+    assert "not `git log`" in read("skills/pm/SKILL.md")
+    assert "git -C" not in tb + read("skills/developer/SKILL.md") + read("skills/pm/SKILL.md")

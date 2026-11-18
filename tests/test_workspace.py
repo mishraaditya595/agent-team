@@ -359,3 +359,30 @@ def test_cleanup_refuses_uncommitted_product_change(ws, capsys):
     assert at.main(["cleanup", "both"]) == 1
     assert "app-flutter" in capsys.readouterr().err
     assert (wt / "app-flutter/ui.txt").read_text() == "edited"
+
+
+def test_missing_product_worktree_fails_clearly(ws, capsys):
+    wt = new_ws_feature(ws)
+    sh("git", "worktree", "remove", "--force", str(wt / "app-flutter"), cwd=ws / "app-flutter")
+    assert not (wt / "app-flutter").exists()
+    capsys.readouterr()
+    for cmd in (["push"], ["test"], ["heads"], ["sync"], ["diff", "--stat"]):
+        assert at.main([cmd[0], "both", *cmd[1:]]) == 1
+        assert "app-flutter: no product worktree; run agent-team repos both --ensure" in capsys.readouterr().err
+
+
+def test_pr_body_repo_must_be_in_workspace_and_honours_stopped(ws, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12"])
+    capsys.readouterr()
+    assert at.main(["pr-body", "both", "--repo", "nope"]) == 1
+    assert "nope" in capsys.readouterr().err
+    at.main(["pr-body", "both", "--repo", "app-backend", "--stopped", "why"])
+    assert "> **Stopped — needs your decision:** why" in capsys.readouterr().out
+
+
+def test_pr_body_single_repo_without_status_md(repo, capsys):
+    wt = repo / ".agent-team" / "worktrees" / "x"
+    sh("git", "worktree", "add", "-q", "-b", "feature/x", str(wt), "origin/main", cwd=repo)
+    assert at.main(["pr-body", "x", "--summary", "s"]) == 0
+    assert "## Summary" in capsys.readouterr().out

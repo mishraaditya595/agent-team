@@ -629,11 +629,17 @@ def task_files(plan):
     return out
 
 
-def ws_repos(slug):
-    """Touched product repos of a workspace feature (status `repos`), with their worktree and source paths."""
-    names = read_status(status_path(slug)).get("repos", "none").split()
-    return [{**r, "wt": worktree(slug) / r["path"], "src": repo_root() / r["path"]}
-            for r in repos() if r["path"] in names]
+def ws_repos(slug, ready=True):
+    """Touched product repos of a workspace feature (status `repos`), with their worktree and source paths.
+    ready: fail clearly when a product worktree is missing (e.g. another machine added the repo)."""
+    sp = status_path(slug)
+    names = read_status(sp).get("repos", "none").split() if sp.exists() else []
+    out = [{**r, "wt": worktree(slug) / r["path"], "src": repo_root() / r["path"]}
+           for r in repos() if r["path"] in names]
+    for r in out:
+        if ready and not r["wt"].exists():
+            raise Fail(f"{r['path']}: no product worktree; run agent-team repos {slug} --ensure")
+    return out
 
 
 def ensure_repo_worktrees(slug):
@@ -769,7 +775,7 @@ def cmd_lease(a):
     if not wt.exists():
         raise Fail(f"no worktree at {wt}")
     _catch_up(wt, branch)
-    for r in ws_repos(a.slug):
+    for r in ws_repos(a.slug, ready=False):
         if r["wt"].exists():
             _catch_up(r["wt"], branch)
     p = feature_dir(wt, a.slug) / "status.md"
@@ -1070,7 +1076,8 @@ def cmd_idea(a):
 
 def repo_prs(slug):
     """status `repo_prs` ("app-backend#12 app-flutter#40") as {path: PR number}; {} for none."""
-    return dict(t.rsplit("#", 1) for t in read_status(status_path(slug)).get("repo_prs", "none").split() if "#" in t)
+    sp = status_path(slug)
+    return dict(t.rsplit("#", 1) for t in read_status(sp).get("repo_prs", "none").split() if "#" in t) if sp.exists() else {}
 
 
 def _ci_one(pr, cwd, grace, watch, repo=None):
@@ -1142,7 +1149,7 @@ def _merge_order(slug, this=None):
     """Product PRs in workspace order, `owner/repo#n` joined with →; `this` (a path) is marked."""
     rps = repo_prs(slug)
     items = [f"{gh_slug(r['src']) or r['path']}#{rps.get(r['path'], '?')}" + (" (this PR)" if r["path"] == this else "")
-             for r in ws_repos(slug) if r["path"] in rps or r["path"] == this]
+             for r in ws_repos(slug, ready=False) if r["path"] in rps or r["path"] == this]
     return " → ".join(items)
 
 
@@ -1152,9 +1159,12 @@ def cmd_pr_body(a):
     rel = f".agent-team/features/{a.slug}/"
     base = github_blob_base(wt, f"feature/{a.slug}")
     if a.repo:
+        if a.repo not in [r["path"] for r in ws_repos(a.slug, ready=False)]:
+            raise Fail(f"{a.repo} is not a product repo of {a.slug}")
         pr, root_slug = read_status(status_path(a.slug)).get("pr", "none"), gh_slug(repo_root())
         ws_pr = f"[workspace PR](https://github.com/{root_slug}/pull/{pr})" if root_slug and pr.isdigit() else "workspace PR"
-        print(f"## Summary\n{a.summary or '<!-- 3 lines -->'}\n\nPart of {a.slug}. Artifacts and reviews: {ws_pr}\n\n"
+        print((f"> **Stopped — needs your decision:** {a.stopped}\n\n" if a.stopped else "") +
+              f"## Summary\n{a.summary or '<!-- 3 lines -->'}\n\nPart of {a.slug}. Artifacts and reviews: {ws_pr}\n\n"
               f"## Merge order\n{_merge_order(a.slug, a.repo)}")
         return
     link = lambda name: f"[{name}]({base}{rel}{name})" if base else f"`{rel}{name}`"
@@ -1277,10 +1287,10 @@ def cmd_cleanup(a):
     branch = f"feature/{a.slug}"
     sp = status_path(a.slug)
     pr = read_status(sp).get("pr", "none") if sp.exists() else "none"
-    rps = repo_prs(a.slug) if sp.exists() else {}
+    rps = repo_prs(a.slug)
     # (label, repo root, worktree, merged-PR head): product repos first, the workspace last
     units = []
-    for r in ws_repos(a.slug) if sp.exists() else []:
+    for r in ws_repos(a.slug, ready=False):
         git("fetch", "-q", "--prune", "origin", cwd=r["src"], check=False)
         units.append((r["path"], r["src"], r["wt"], merged_pr_head(rps.get(r["path"]), r["src"], gh_slug(r["src"]))))
     git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
