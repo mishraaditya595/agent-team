@@ -523,4 +523,8 @@ def test_workspace_mode_wired_in_skills():
     assert "Cross-repo rules" in read("skills/reviewer/SKILL.md")
     assert "Spec problems" in read("skills/tech-lead/SKILL.md") and "## Repos" in read("skills/tech-lead/SKILL.md")
     assert "repo_prs" in read("skills/team-wrap/SKILL.md")
+    assert "--summary '<3 lines>')\"` for each product PR" in tb and tb.index("repo_prs=") < tb.index("Then the workspace PR")
+    assert '"last_reviewed_commit=$(agent-team heads <slug>)"' in tb and tb.count("last_reviewed_commit=$(") == 3
+    assert '--since "<since>"' in read("skills/reviewer/SKILL.md")
+    assert tb.index("If it's rejected") < tb.index("Otherwise, in a workspace, run")
     assert "git -C" not in tb + read("skills/developer/SKILL.md")
