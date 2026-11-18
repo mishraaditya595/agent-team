@@ -535,3 +535,11 @@ def test_workspace_mode_wired_in_skills():
     assert "plain `git add`/`git commit`" in read("skills/developer/SKILL.md")
     assert "not `git log`" in read("skills/pm/SKILL.md")
     assert "git -C" not in tb + read("skills/developer/SKILL.md") + read("skills/pm/SKILL.md")
+
+
+def test_team_build_pr_step_workspace_first_and_needs_github_remote():
+    tb = read("skills/team-build/SKILL.md")
+    pr = tb[tb.index("7. **pr**"):tb.index("8. **ci**")]
+    assert pr.index("In a workspace") < pr.index("if `gh pr view feature/<slug> --json number` finds a PR")
+    assert "(instead of the single-repo steps below)" in pr
+    assert "`repo=` is `-`" in pr and "has no GitHub remote" in pr
