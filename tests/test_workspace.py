@@ -191,3 +191,12 @@ def test_drift_unchecked_in_workspace(ws, capsys):
     (wt / ".agent-team/features/both/plan.md").write_text("planned-at: abc1234\n## Files\n- `app-backend/a`\n")
     at.main(["drift", "both"])
     assert "drift: unchecked (workspace mode)" in capsys.readouterr().out
+
+
+def test_ensure_rerun_pushes_after_failed_push(ws):
+    new_ws_feature(ws, ensure=False)
+    sh("git", "config", "remote.origin.pushurl", "/nonexistent.git", cwd=ws / "app-flutter")
+    assert at.main(["repos", "both", "--ensure"]) == 1
+    sh("git", "config", "--unset", "remote.origin.pushurl", cwd=ws / "app-flutter")
+    assert at.main(["repos", "both", "--ensure"]) == 0
+    assert sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=ws / "app-flutter")

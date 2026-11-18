@@ -636,7 +636,9 @@ def ensure_repo_worktrees(slug):
     branch = f"feature/{slug}"
     for r in rs:
         dest, src = wt / r["path"], repo_root() / r["path"]
-        if dest.exists():
+        if dest.exists():   # a failed push last time leaves the worktree but no remote branch
+            if not git("ls-remote", "--heads", "origin", branch, cwd=src):
+                git("push", "-q", "-u", "origin", branch, cwd=dest)
             continue
         if run(["git", "check-ignore", "-q", f"{r['path']}/"], cwd=wt, check=False).returncode:
             raise Fail(f"{r['path']} is not gitignored by the workspace; add /{r['path']}/ to .gitignore")
