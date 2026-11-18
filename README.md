@@ -40,6 +40,17 @@ In Claude Code:
 /plugin install solo-squad --marketplace mishraaditya595/agent-team
 ```
 
+**Upgrading from `agent-team` (0.3.0 or earlier)?** The plugin and its marketplace were renamed to `solo-squad`, so the old install no longer resolves. Reinstall once:
+
+```
+/plugin uninstall agent-team@agent-team
+/plugin marketplace remove agent-team
+/plugin marketplace add mishraaditya595/agent-team
+/plugin install solo-squad@solo-squad
+```
+
+The `agent-team` CLI and your `.agent-team/` folders are unchanged.
+
 For Codex, Gemini CLI or other tools:
 
 ```bash

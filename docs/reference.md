@@ -16,6 +16,8 @@ Alternatives (both skip the PATH step — the workflows then call `python3 <team
 - **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add mishraaditya595/agent-team`, then `/plugin install solo-squad@solo-squad`.
 - **Any Agent Skills tool:** `npx skills add mishraaditya595/agent-team`.
 
+**Upgrading from the `agent-team` plugin (0.3.0 or earlier):** `/plugin uninstall agent-team@agent-team`, `/plugin marketplace remove agent-team`, then add the marketplace again and `/plugin install solo-squad@solo-squad`. The `agent-team` CLI and `.agent-team/` folders don't change.
+
 ## First run in a product repo
 
 1. `team-init` — creates `.agent-team/`, drafts `project.md` from the codebase (owner, build/test commands, voice, channels), and writes permission settings so builds don't stop for prompts. Read `project.md` once and fix it.
