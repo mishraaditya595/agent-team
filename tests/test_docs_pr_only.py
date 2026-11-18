@@ -42,3 +42,22 @@ def test_docs_pr_only_parsing():
 def test_template_example_does_not_enable_it():
     from test_agent_team import ROOT
     assert not at.docs_pr_only((ROOT / "skills/team-init/references/project-template.md").read_text())
+
+
+def test_pr_only_on_origin_main_applies_to_stale_checkout(repo, tmp_path, capsys):
+    """Another machine merged the setting into main; this checkout hasn't pulled yet."""
+    o = tmp_path / "other"
+    sh("git", "clone", "-q", str(tmp_path / "remote.git"), str(o), cwd=tmp_path)
+    sh("git", "config", "user.email", "x@x", cwd=o); sh("git", "config", "user.name", "x", cwd=o)
+    p = o / ".agent-team" / "project.md"
+    p.write_text(p.read_text() + "\n## Conventions\n- docs-push: pr-only\n")
+    sh("git", "commit", "-qam", "pr-only", cwd=o); sh("git", "push", "-q", cwd=o)
+    add_idea(repo)
+    assert at.main(["docs-commit", "-m", "ideas", ".agent-team/ideas.md"]) == 0
+    assert "pushed to agent-team/meta" in capsys.readouterr().out
+
+
+def test_pr_only_pasted_with_markup_still_applies():
+    base = "# x\n\n## Conventions\n{}\n"
+    assert at.docs_pr_only(base.format("`- docs-push: pr-only`"))
+    assert at.docs_pr_only(base.format("- **docs-push:** `pr-only`"))

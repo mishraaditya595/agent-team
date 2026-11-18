@@ -305,8 +305,9 @@ def project_command(name, text=None):
 def docs_pr_only(text):
     """project.md ## Conventions has `- docs-push: pr-only`: docs never go straight to the default branch.
     text None (no project.md yet) → False."""
-    return bool(text) and bool(re.search(r"^\s*-\s*docs-push:\s*pr-only\b", section(text, "Conventions"),
-                                         re.M | re.I))
+    # Backticks / bold around key or value are tolerated: a pasted example must not silently stay off.
+    pat = r"^[\s`*]*-\s*[`*]*docs-push:[`*]*\s*[`*]*pr-only\b"
+    return bool(text) and bool(re.search(pat, section(text, "Conventions"), re.M | re.I))
 
 
 # ---------- status.md ----------
@@ -1135,7 +1136,9 @@ def cmd_docs_commit(a):
     files = _expand_paths(root, a.paths)
     if not files:
         raise Fail("nothing to commit: none of those paths exist")
-    to_meta = docs_pr_only(read_doc(".agent-team/project.md")) or meta_active(root, d)
+    # The local copy may lag origin/<default> (another machine set it): either one turns pr-only on.
+    to_meta = (docs_pr_only(read_doc(".agent-team/project.md"))
+               or docs_pr_only(show(f"origin/{d}", ".agent-team/project.md", root)) or meta_active(root, d))
     target, changed = _docs_attempt(root, d, files, a.message, to_meta=to_meta)
     if target == "protected":
         target, changed = _docs_attempt(root, d, files, a.message, to_meta=True)
