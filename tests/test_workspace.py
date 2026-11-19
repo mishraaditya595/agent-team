@@ -302,3 +302,46 @@ def test_rules_slug_reaches_product_and_workspace_rules(ws_feature, workspace, c
     commit(wt / "api", "AGENTS.md", "api rules\n")
     commit(wt / "api", "src.txt", "changed\n")
     assert out(capsys, "rules", "xr")[1] == "AGENTS.md\napi/AGENTS.md"
+
+
+# ---------- Task 8: sync, push ----------
+
+def push_to_base(ws, path, name, text):
+    d = ws / path
+    commit(d, name, text, "base change")
+    sh("git", "push", "-q", "origin", "main", cwd=d)
+
+
+def test_ws_sync_merges_each_repo(ws_feature, workspace, capsys):
+    push_to_base(workspace, "api", "base.txt", "b\n")
+    code, o, _ = out(capsys, "sync", "xr")
+    assert code == 0 and "api: merged origin/main" in o and "up to date with origin/main" in o
+    assert (ws_feature[0] / "api" / "base.txt").exists()
+
+
+def test_ws_sync_conflict_names_repo(ws_feature, workspace, capsys):
+    wt, _ = ws_feature
+    push_to_base(workspace, "api", "src.txt", "theirs\n")
+    commit(wt / "api", "src.txt", "ours\n")
+    code, _, err = out(capsys, "sync", "xr")
+    assert code == 2 and "api" in err and "src.txt" in err
+
+
+def test_ws_push_pushes_products_then_workspace(ws_feature, workspace, capsys):
+    wt, _ = ws_feature
+    c = commit(wt / "api", "p.txt")
+    code, o, _ = out(capsys, "push", "xr")
+    assert code == 0 and o.splitlines() == ["api: pushed feature/xr", "pushed feature/xr"]
+    sh("git", "fetch", "-q", "origin", cwd=workspace / "api")
+    assert sh("git", "rev-parse", "--short", "origin/feature/xr", cwd=workspace / "api") == c
+
+
+def test_ws_push_rejected_product_exit3(ws_feature, tmp_path, capsys):
+    wt, _ = ws_feature
+    other = tmp_path / "other-api2"
+    sh("git", "clone", "-q", "-b", "feature/xr", str(tmp_path / "api.git"), str(other), cwd=tmp_path)
+    sh("git", "config", "user.email", "o@o", cwd=other); sh("git", "config", "user.name", "o", cwd=other)
+    commit(other, "o.txt"); sh("git", "push", "-q", cwd=other)
+    commit(wt / "api", "l.txt")
+    code, _, err = out(capsys, "push", "xr")
+    assert code == 3 and "api: push rejected" in err

@@ -1061,45 +1061,56 @@ def cmd_test(a):
     return 0
 
 
-def cmd_sync(a):
-    wt = worktree(a.slug)
-    d = default_branch()
-    dirty = git("status", "--porcelain", "--", ".", f":(exclude).agent-team/features/{a.slug}", cwd=wt)
+def _sync_one(wt, d, label, keep):
+    """Merge origin/<d> into one worktree. label: "" for the workspace/single repo, "<repo>: " for a product."""
+    dirty = git("status", "--porcelain", "--", ".", f":(exclude){keep}", cwd=wt)
     if dirty:
-        raise Fail("uncommitted changes in the worktree (not a merge conflict); commit or discard them first:\n"
-                   + dirty)
+        raise Fail(f"{label}uncommitted changes in the worktree (not a merge conflict); commit or discard them "
+                   f"first:\n" + dirty)
     git("fetch", "-q", "origin", d, cwd=wt)
     if run(["git", "merge-base", "--is-ancestor", f"origin/{d}", "HEAD"], cwd=wt, check=False).returncode == 0:
-        print(f"up to date with origin/{d}")
-        return 0
+        print(f"{label}up to date with origin/{d}")
+        return
     r = run(["git", "merge", "--no-edit", f"origin/{d}"], cwd=wt, check=False)
     if r.returncode:
         files = git("diff", "--name-only", "--diff-filter=U", cwd=wt, check=False)
         run(["git", "merge", "--abort"], cwd=wt, check=False)
         if not files:
-            raise Fail(f"merging origin/{d} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
-        raise Fail(f"merge conflict with origin/{d} in: {', '.join(files.split())}", code=2)
-    print(f"merged origin/{d}")
+            raise Fail(f"{label}merging origin/{d} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
+        raise Fail(f"{label}merge conflict with origin/{d} in: {', '.join(files.split())}", code=2)
+    print(f"{label}merged origin/{d}")
+
+
+def cmd_sync(a):
+    for r in status_repos(a.slug):
+        _sync_one(product_wt(a.slug, r["path"]), repo_branch(r), f"{r['path']}: ", ".agent-team")
+    _sync_one(worktree(a.slug), default_branch(), "", f".agent-team/features/{a.slug}")
     return 0
 
 
-def cmd_push(a):
-    wt = worktree(a.slug)
-    branch = f"feature/{a.slug}"
+def _push_one(wt, slug, label):
+    branch = f"feature/{slug}"
     r = run(["git", "push", "-u", "origin", branch], cwd=wt, check=False)
     if r.returncode == 0:
-        print(f"pushed {branch}")
-        return 0
+        print(f"{label}pushed {branch}")
+        return
     if REFUSED.search(r.stderr or ""):
-        raise Fail(f"push refused by the server (branch protection or a hook on {branch}): {_refusal(r)}. "
+        raise Fail(f"{label}push refused by the server (branch protection or a hook on {branch}): {_refusal(r)}. "
                    f"agent-team needs to push feature/* branches; check the repo's rules.")
     if not REJECTED.search(r.stderr or ""):
-        raise Fail(f"push failed (network, sign-in or permissions?): {_last_line(r)}")
+        raise Fail(f"{label}push failed (network, sign-in or permissions?): {_last_line(r)}")
     git("fetch", "-q", "origin", branch, cwd=wt, check=False)
-    rs = run(["git", "show", f"origin/{branch}:.agent-team/features/{a.slug}/status.md"], cwd=wt, check=False)
+    rs = run(["git", "show", f"origin/{branch}:.agent-team/features/{slug}/status.md"], cwd=wt, check=False)
     owner = read_status_text(rs.stdout).get("owner", "unknown") if rs.returncode == 0 else "unknown"
-    raise Fail(f"push rejected: {branch} has commits from elsewhere ({_last_line(r)}). Remote owner: {owner}. "
+    raise Fail(f"{label}push rejected: {branch} has commits from elsewhere ({_last_line(r)}). Remote owner: {owner}. "
                f"Never force-push; stop and tell the owner.", code=3)
+
+
+def cmd_push(a):
+    for r in status_repos(a.slug):       # products first: the workspace branch carries the lease, so it goes last
+        _push_one(product_wt(a.slug, r["path"]), a.slug, f"{r['path']}: ")
+    _push_one(worktree(a.slug), a.slug, "")
+    return 0
 
 
 def cmd_idea(a):
