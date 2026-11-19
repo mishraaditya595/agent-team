@@ -1,6 +1,6 @@
 ---
 name: developer
-description: agent-team developer role. Use when a feature's plan.md is ready and its tasks need implementing on the feature branch, test-first, or when review, QA or CI findings need fixing.
+description: solo-squad developer role. Use when a feature's plan.md is ready and its tasks need implementing on the feature branch, test-first, or when review, QA or CI findings need fixing.
 model: haiku
 ---
 

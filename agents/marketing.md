@@ -1,6 +1,6 @@
 ---
 name: marketing
-description: agent-team marketing role. Use when a merged feature, or an idea, plan or topic the owner hands over, needs outreach drafts — Instagram carousels, blog posts, LinkedIn and Reddit posts, release notes and announcements in the product's voice.
+description: solo-squad marketing role. Use when a merged feature, or an idea, plan or topic the owner hands over, needs outreach drafts — Instagram carousels, blog posts, LinkedIn and Reddit posts, release notes and announcements in the product's voice.
 model: sonnet
 ---
 

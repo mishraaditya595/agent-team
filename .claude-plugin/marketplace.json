@@ -1,10 +1,10 @@
 {
-  "name": "agent-team",
+  "name": "solo-squad",
   "description": "A portable AI product team for your repo.",
   "owner": { "name": "Aditya Mishra", "url": "https://github.com/mishraaditya595" },
   "plugins": [
     {
-      "name": "agent-team",
+      "name": "solo-squad",
       "source": "./",
       "description": "A portable AI product team: PM, Tech Lead, Developer, Reviewer, QA and Marketing."
     }

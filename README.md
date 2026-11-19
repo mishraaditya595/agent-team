@@ -1,4 +1,4 @@
-# 🤝 agent-team
+# 🤝 solo-squad
 
 **A small AI product team that lives in your repo.** It dreams up features, plans them, builds them, reviews its own work, tests it and opens a pull request. You only say *"yes, build that"* and *"yes, merge it"*.
 
@@ -6,7 +6,7 @@
 
 You've already built your product. Now every new feature means the same slog: decide what to build, plan it, code it, review it, test it, write the launch post. Doing that with an AI assistant still means babysitting every step, and it burns expensive tokens on work a cheaper model could do.
 
-## ✨ What agent-team does
+## ✨ What solo-squad does
 
 Six specialists, each running on the **cheapest model that can do the job**:
 
@@ -37,8 +37,19 @@ The two 👤 steps are the only ones that need you. The one exception: if grilli
 In Claude Code:
 
 ```
-/plugin install agent-team --marketplace mishraaditya595/agent-team
+/plugin install solo-squad --marketplace mishraaditya595/agent-team
 ```
+
+**Upgrading from `agent-team` (0.3.0 or earlier)?** The plugin and its marketplace were renamed to `solo-squad`, so the old install no longer resolves. Reinstall once:
+
+```
+/plugin uninstall agent-team@agent-team
+/plugin marketplace remove agent-team
+/plugin marketplace add mishraaditya595/agent-team
+/plugin install solo-squad@solo-squad
+```
+
+The `agent-team` CLI and your `.agent-team/` folders are unchanged.
 
 For Codex, Gemini CLI or other tools:
 
