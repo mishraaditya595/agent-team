@@ -482,3 +482,22 @@ def test_cleanup_refuses_unlisted_nested_worktree(ws_feature, workspace, capsys)
     code, _, err = out(capsys, "cleanup", "xr")
     assert code == 1 and "api" in err and "not in ## Repos" in err
     assert (wt / "api" / "wip.txt").exists()
+
+
+def test_repos_path_escaping_root_fails(workspace, tmp_path, capsys):
+    product(tmp_path, tmp_path, "x")                        # a real repo next to the workspace
+    p = workspace / ".agent-team" / "project.md"
+    p.write_text(p.read_text().replace("### app", "### ../x"))
+    code, _, err = out(capsys, "repos")
+    assert code == 1 and "../x" in err and "outside" in err
+
+
+def test_cleanup_checks_unrecorded_product_worktree(ws_feature, workspace, capsys):
+    wt, fd = ws_feature                                     # status repos: api
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
+    assert at.main(["push", "xr"]) == 0
+    sh("git", "worktree", "add", "-q", "-b", "feature/xr", str(wt / "app"), "origin/main", cwd=workspace / "app")
+    (wt / "app" / "wip.txt").write_text("uncommitted\n")    # ensure created it, then died before write_status
+    code, _, err = out(capsys, "cleanup", "xr")
+    assert code == 1 and "app: uncommitted changes" in err
+    assert (wt / "app" / "wip.txt").exists()

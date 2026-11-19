@@ -326,6 +326,8 @@ def repos(text=None):
     out = []
     for m in re.finditer(r"^###\s+(\S+)[^\n]*\n?(.*?)(?=^###\s|\Z)", section(text, "Repos"), re.M | re.S):
         block = m.group(2)
+        if Path(m.group(1)).is_absolute() or ".." in Path(m.group(1)).parts:
+            raise Fail(f"## Repos path {m.group(1)} is outside the workspace; use a folder inside it")
         field = lambda k: (re.search(rf"^\s*-\s*{k}:\s*`?([^`\n]*?)`?\s*$", block, re.M | re.I) or [None, None])[1]
         out.append({"path": m.group(1).strip("`/"), "role": field("Role") or "", "branch": field("Branch") or None,
                     "block": block})
@@ -1374,7 +1376,9 @@ def cmd_cleanup(a):
     st = read_status(sp) if sp.exists() else {}
     prs = dict(parse_repo_prs(st.get("repo_prs")))
     listed = repos() if read_doc(".agent-team/project.md") is not None else []
-    rs = status_repos(a.slug) or [r for r in listed if product_wt(a.slug, r["path"]).exists()]
+    # status repos, plus any listed product worktree that exists (ensure may have died before recording it)
+    recorded = {r["path"] for r in status_repos(a.slug)}
+    rs = [r for r in listed if r["path"] in recorded or product_wt(a.slug, r["path"]).exists()]
     problems, jobs = [], []
     for name in st.get("repos", "none").split():
         if name != "none" and name not in {r["path"] for r in listed} and product_wt(a.slug, name).exists():
