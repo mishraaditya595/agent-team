@@ -563,7 +563,9 @@ def idea_info(slug):
         if block:
             st = re.search(r"\*\*Status:\*\*\s*(\w+)", block)
             eff = re.search(r"\*\*Effort:\*\*\s*([SML])", block)
-            return {"status": st.group(1) if st else "proposed", "effort": eff.group(1) if eff else None}
+            rp = re.search(r"\*\*Repos:\*\*\s*(.+)$", block, re.M)
+            return {"status": st.group(1) if st else "proposed", "effort": eff.group(1) if eff else None,
+                    "repos": [p.strip(" `/") for p in rp.group(1).split(",") if p.strip(" `/")] if rp else []}
     raise Fail(f"unknown slug '{slug}': not in .agent-team/ideas.md")
 
 
@@ -1001,7 +1003,8 @@ def cmd_idea(a):
                 return 0
         raise Fail(f"unknown slug '{a.slug}': not in .agent-team/ideas.md")
     info = idea_info(a.slug)
-    print(f"status={info['status']} effort={info['effort'] or '?'}")
+    print(f"status={info['status']} effort={info['effort'] or '?'}"
+          + (f" repos={','.join(info['repos'])}" if info["repos"] else ""))
 
 
 def cmd_ci(a):

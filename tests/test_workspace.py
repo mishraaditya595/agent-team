@@ -122,3 +122,14 @@ def test_upgrade_ignores_unignored_nested_repo(repo, tmp_path, capsys):
 def test_merged_allow_includes_repo_commands(workspace):
     allow = at.merged_allow([], (workspace / ".agent-team" / "project.md").read_text())
     assert "Bash(npm ci:*)" in allow and allow.count("Bash(true:*)") == 1
+
+
+# ---------- Task 5: ideation ----------
+
+def test_idea_repos_line(workspace, capsys):
+    i = workspace / ".agent-team" / "ideas.md"
+    i.write_text(i.read_text() + "\n### xr — Cross\n- **Repos:** api, `app`\n- **Value:** H · **Effort:** M · **Risk:** x\n")
+    assert at.idea_info("xr")["repos"] == ["api", "app"]
+    assert at.idea_info("tiny")["repos"] == []
+    assert out(capsys, "idea", "xr")[1] == "status=proposed effort=M repos=api,app"
+    assert out(capsys, "idea", "tiny")[1] == "status=proposed effort=S"
