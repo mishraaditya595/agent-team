@@ -295,13 +295,46 @@ def project_md():
     return text
 
 
-def project_command(name, text=None):
-    """`- Test: `cmd`` from project.md ## Build & test; None when missing or 'none'."""
-    body = section(text if text is not None else project_md(), "Build & test")
-    m = re.search(rf"^\s*-\s*{name}:\s*`([^`]+)`", body, re.M | re.I)
+def block_command(block, name):
+    """`- Test: `cmd`` from a block of project.md text; None when missing or 'none'."""
+    m = re.search(rf"^\s*-\s*{name}:\s*`([^`]+)`", block, re.M | re.I)
     if not m or m.group(1).strip().lower().startswith("none"):
         return None
     return m.group(1).strip()
+
+
+def project_command(name, text=None):
+    """`- Test: `cmd`` from project.md ## Build & test; None when missing or 'none'."""
+    return block_command(section(text if text is not None else project_md(), "Build & test"), name)
+
+
+def repos(text=None):
+    """Workspace mode: the product repos under project.md ## Repos (one `### <path>` block each), ordered by
+    ## Cross-repo rules `Order:` then listing order. [] in a single-repo project."""
+    text = text if text is not None else project_md()
+    out = []
+    for m in re.finditer(r"^###\s+(\S+)[^\n]*\n?(.*?)(?=^###\s|\Z)", section(text, "Repos"), re.M | re.S):
+        block = m.group(2)
+        field = lambda k: (re.search(rf"^\s*-\s*{k}:\s*`?([^`\n]*?)`?\s*$", block, re.M | re.I) or [None, None])[1]
+        out.append({"path": m.group(1).strip("`/"), "role": field("Role") or "", "branch": field("Branch") or None,
+                    "block": block})
+    om = re.search(r"^\W*Order:\s*(.+)$", section(text, "Cross-repo rules"), re.M | re.I)
+    order = [p.strip(" `/") for p in om.group(1).split(",")] if om else []
+    rank = lambda r: order.index(r["path"]) if r["path"] in order else len(order)
+    return sorted(out, key=rank)    # stable: unlisted repos keep their listing order
+
+
+def repo_branch(r):
+    return r["branch"] or default_branch(repo_root() / r["path"])
+
+
+def repo_dir(path):
+    """The workspace's clone of a product repo; Fail unless it's a git repo's top level."""
+    d = repo_root() / path
+    top = git("rev-parse", "--show-toplevel", cwd=d, check=False) if d.is_dir() else ""
+    if not top or Path(top).resolve() != d.resolve():
+        raise Fail(f"{path} (## Repos in project.md) isn't a git repo at {d}")
+    return d
 
 
 def docs_pr_only(text):
@@ -810,8 +843,20 @@ def cmd_rules(a):
         root, paths = work_dir(t[0]), feature_paths(t[0])
     else:
         root, paths = rules_root(), t or ["."]
+        if not t and read_doc(".agent-team/project.md") is not None:
+            paths += [r["path"] for r in repos()]       # each product repo's top-level rules too
     found = rule_files(root, paths, fallback=repo_root() if root != repo_root() else None)
     print("\n".join(found) if found else "none")
+
+
+def cmd_repos(a):
+    rs = repos()
+    if not rs:
+        print("single-repo")
+        return 0
+    for r in rs:
+        d = repo_dir(r["path"])
+        print(f"{r['path']} {repo_branch(r)} {git('log', '-1', '--format=%h %s', cwd=d, check=False)}")
 
 
 def cmd_audit_path(a):
@@ -1446,6 +1491,8 @@ def build_parser():
     s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
     s = sub.add_parser("rules", help="the repo's AGENTS.md/CLAUDE.md files governing a feature's or some paths' code")
     s.add_argument("targets", nargs="*", metavar="SLUG|PATH"); s.set_defaults(fn=cmd_rules)
+    s = sub.add_parser("repos", help="workspace mode: the product repos in project.md ## Repos")
+    s.set_defaults(fn=cmd_repos)
     s = sub.add_parser("audit-path", help="next free audit report path, and earlier audit reports")
     s.add_argument("--date", help="YYYY-MM-DD (default: today, UTC)"); s.set_defaults(fn=cmd_audit_path)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
