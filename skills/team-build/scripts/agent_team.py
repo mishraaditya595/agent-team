@@ -33,7 +33,8 @@ POLL_SECONDS = 15
 TIERS = ("deep", "standard", "fast")
 STAGES = ("spec", "grill", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
 STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
-               "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro", "repos", "repo_prs")
+               "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro")
+WORKSPACE_STATUS_KEYS = ("repos", "repo_prs")   # not in status-template.md: `repos --ensure` adds them in a workspace
 IDEA_STATUSES = ("proposed", "shipped", "rejected")   # in progress = a feature/<slug> branch exists
 LEASE_TTL_HOURS = 6   # a lease older than this (no log/commit since) counts as abandoned
 BIG_DIFF_LINES, BIG_DIFF_FILES = 400, 15
@@ -373,8 +374,8 @@ def read_status(path):
 
 def check_status_values(updates):
     for k, v in updates.items():
-        if k not in STATUS_KEYS:
-            raise Fail(f"unknown status key '{k}' (known: {', '.join(STATUS_KEYS)})")
+        if k not in STATUS_KEYS + WORKSPACE_STATUS_KEYS:
+            raise Fail(f"unknown status key '{k}' (known: {', '.join(STATUS_KEYS + WORKSPACE_STATUS_KEYS)})")
         if k in ("stage", "stopped_at") and v not in STAGES and not (k == "stopped_at" and v == "none"):
             raise Fail(f"unknown stage '{v}' (known: {', '.join(STAGES)})")
         if k.endswith("_round") and not v.isdigit():
