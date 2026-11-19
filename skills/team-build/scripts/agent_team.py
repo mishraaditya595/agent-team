@@ -1135,12 +1135,34 @@ def cmd_idea(a):
           + (f" repos={','.join(info['repos'])}" if info["repos"] else ""))
 
 
+def parse_repo_prs(v):
+    """status.md repo_prs "api#12 app#40" → [("api", "12"), ("app", "40")]."""
+    return [tuple(p.split("#", 1)) for p in (v or "").split() if "#" in p]
+
+
 def cmd_ci(a):
-    """Waits for checks to appear (GitHub can take a minute after a push) before deciding there is no CI."""
-    pr = read_status(status_path(a.slug)).get("pr", "none")
-    if pr in ("", "none"):
+    """Waits for checks to appear (GitHub can take a minute after a push) before deciding there is no CI.
+    In a workspace: every product PR (repo_prs) and the workspace PR; pass only if all pass or have no CI."""
+    st = read_status(status_path(a.slug))
+    pr = st.get("pr", "none")
+    prs = [(f"{p}#{n}: ", n, product_wt(a.slug, p)) for p, n in parse_repo_prs(st.get("repo_prs"))]
+    prs += [("", pr, work_dir(a.slug))] if pr not in ("", "none") else []
+    if not prs:
         raise Fail("no pr in status.md")
-    wd = work_dir(a.slug)
+    if len(prs) == 1 and not prs[0][0]:
+        return _ci_one(a, pr, work_dir(a.slug), "")[0]
+    results = [_ci_one(a, n, wd, label, quiet=True) for label, n, wd in prs]
+    failed = [lines for code, verdict, lines in results if verdict == "fail"]
+    for lines in failed:
+        print(lines)
+    verdict = "fail" if failed else "pending" if any(v == "pending" for _, v, _ in results) else "pass"
+    print(f"ci: {verdict}")
+    return 1 if failed else 0
+
+
+def _ci_one(a, pr, wd, label, quiet=False):
+    """One PR's checks → (exit code, verdict, failing lines prefixed with label). Prints today's lines unless quiet."""
+    say = (lambda *_: None) if quiet else print
     has_workflows = any((wd / ".github" / "workflows").glob("*.y*ml"))
     grace = a.grace if a.grace is not None else (300 if has_workflows else 60)
     deadline = time.monotonic() + grace
@@ -1150,21 +1172,22 @@ def cmd_ci(a):
         if "no checks reported" not in out.lower():
             break
         if time.monotonic() >= deadline:
-            print(f"ci: none (no checks appeared within {grace}s)")
-            return 0
+            say(f"ci: none (no checks appeared within {grace}s)")
+            return 0, "none", ""
         time.sleep(POLL_SECONDS)
     if a.watch:
         r = run(["gh", "pr", "checks", pr, "--watch", "--interval", "30"], cwd=wd, check=False)
         out = (r.stdout + r.stderr).strip()
     if r.returncode == 0:
-        print("ci: pass")
-        return 0
+        say("ci: pass")
+        return 0, "pass", ""
     if r.returncode == 8:
-        print("ci: pending")
-        return 0
-    print("\n".join(l for l in out.splitlines() if re.search(r"\bfail", l, re.I)) or out[-2000:])
-    print("ci: fail")
-    return 1
+        say("ci: pending")
+        return 0, "pending", ""
+    lines = "\n".join(l for l in out.splitlines() if re.search(r"\bfail", l, re.I)) or out[-2000:]
+    say(lines)
+    say("ci: fail")
+    return 1, "fail", "\n".join(label + l for l in lines.splitlines())
 
 
 def github_blob_base(wt, branch):
@@ -1199,7 +1222,15 @@ def cmd_pr_body(a):
         parts.append(f"> **Stopped — needs your decision:** {a.stopped}\n")
     parts.append("## Summary\n" + (a.summary or "<!-- 3 lines -->"))
     grill = ["grill.md"] if (fd / "grill.md").exists() else []
-    parts.append("## Artifacts\n" + "\n".join(f"- {link(n)}" for n in ["spec.md", *grill, "plan.md", *reports]))
+    artifacts = "\n".join(f"- {link(n)}" for n in ["spec.md", *grill, "plan.md", *reports])
+    vals = read_status(fd / "status.md") if (fd / "status.md").exists() else {}
+    prs = dict(parse_repo_prs(vals.get("repo_prs")))
+    if a.repo:
+        return _product_pr_body(a, vals, prs, parts, artifacts, base)
+    parts.append("## Artifacts\n" + artifacts)
+    if prs:
+        parts.append("## Product PRs\nMerge these first, in this order; this PR (agent-team artifacts) last.\n"
+                     + "\n".join(f"- {p}#{n}" for p, n in prs.items()))
     checks = _decisions_to_check(fd)
     if checks:
         parts.append("## Decisions to check\nCalls the agents made on your behalf — assumed grill answers and "
@@ -1211,10 +1242,34 @@ def cmd_pr_body(a):
     print("\n\n".join(parts))
 
 
+def _product_pr_body(a, st, prs, parts, artifacts, base):
+    """A product repo's PR body in a workspace: links back to the workspace PR and states merge order."""
+    order = [r["path"] for r in status_repos(a.slug)]
+    if a.repo not in order:
+        raise Fail(f"{a.repo} isn't one of this feature's repos ({' '.join(order) or 'none'})")
+    pr = st.get("pr", "none")
+    ws_url = re.sub(r"/blob/.*$", f"/pull/{pr}", base) if base and pr not in ("", "none") else ""
+    ws = f"[workspace PR #{pr}]({ws_url})" if ws_url else "the workspace PR"
+    others = [f"{p}#{n}" for p, n in prs.items() if p != a.repo]
+    parts.append(f"## Artifacts\nSpec, plan, reviews and QA live in {ws} (agent-team artifacts):\n{artifacts}")
+    parts.append(f"## Part of a cross-repo change\nPart of `{a.slug}`: {', '.join(others) or 'no other product PRs yet'}"
+                 f"{f', {ws}' if ws_url else ''}.\n\nMerge order: "
+                 + " → ".join(f"{p} (this PR)" if p == a.repo else f"{p}#{prs[p]}" if p in prs else p for p in order)
+                 + " → workspace PR (agent-team artifacts)")
+    print("\n\n".join(parts))
+
+
 def _sum_usage(log):
     tokens = sum(int(x) for x in re.findall(r"tokens=(\d+)", log))
     cost = sum(float(x) for x in re.findall(r"cost=\$?([\d.]+)", log))
     return tokens, cost
+
+
+def _pr_column(s):
+    prs = parse_repo_prs(s.get("repo_prs"))
+    if not prs:
+        return s.get("pr", "none")
+    return " ".join(f"{p}#{n}" for p, n in prs) + (f" ws#{s['pr']}" if s.get("pr", "none") != "none" else "")
 
 
 def cmd_summary(a):
@@ -1246,7 +1301,7 @@ def cmd_summary(a):
         tokens, cost = _sum_usage(text.split("## Log", 1)[-1])
         note = s.get("stop_reason", "none")
         rows.append(f"| {slug} | {s.get('stage', '?')} | {s.get('review_round', '0')} | {s.get('qa_round', '0')} | "
-                    f"{s.get('pr', 'none')} | {tokens or '-'} | {f'${cost:.2f}' if cost else '-'} | "
+                    f"{_pr_column(s)} | {tokens or '-'} | {f'${cost:.2f}' if cost else '-'} | "
                     f"{'' if note == 'none' else note} |")
     if not rows:
         print("no features yet")
@@ -1678,6 +1733,7 @@ def build_parser():
     s.set_defaults(fn=cmd_ci)
     s = sub.add_parser("pr-body", help="print the PR body")
     s.add_argument("slug"); s.add_argument("--summary"); s.add_argument("--stopped", metavar="REASON")
+    s.add_argument("--repo", metavar="PATH", help="workspace mode: the body for that product repo's PR")
     s.set_defaults(fn=cmd_pr_body)
     s = sub.add_parser("summary", help="all features: stage, rounds, tokens, cost")
     s.set_defaults(fn=cmd_summary)

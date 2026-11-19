@@ -345,3 +345,77 @@ def test_ws_push_rejected_product_exit3(ws_feature, tmp_path, capsys):
     commit(wt / "api", "l.txt")
     code, _, err = out(capsys, "push", "xr")
     assert code == 3 and "api: push rejected" in err
+
+
+# ---------- Task 9: ci, pr-body, summary ----------
+
+def gh_checks(tmp_path, monkeypatch, results):
+    """gh stub: `gh pr checks <n>` exits/prints results[n] = (code, output)."""
+    import json, os
+    bin_ = tmp_path / "fakebin"; bin_.mkdir(exist_ok=True)
+    state = tmp_path / "gh-checks.json"; state.write_text(json.dumps(results))
+    (bin_ / "gh").write_text(f'''#!/usr/bin/env python3
+import json, sys
+a = sys.argv[1:]
+if a[:2] == ["pr", "checks"]:
+    code, text = json.load(open("{state}"))[a[2]]
+    print(text); sys.exit(code)
+sys.exit(1)
+''')
+    (bin_ / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+
+
+def set_status(fd, **kv):
+    at.write_status(fd / "status.md", kv)
+
+
+def test_ws_ci_all_pass(ws_feature, tmp_path, monkeypatch, capsys):
+    set_status(ws_feature[1], pr="5", repo_prs="api#12")
+    gh_checks(tmp_path, monkeypatch, {"12": [0, "build\tpass"], "5": [0, "x\tpass"]})
+    assert out(capsys, "ci", "xr", "--grace", "0")[:2] == (0, "ci: pass")
+
+
+def test_ws_ci_one_fails_names_repo(ws_feature, tmp_path, monkeypatch, capsys):
+    set_status(ws_feature[1], pr="5", repo_prs="api#12")
+    gh_checks(tmp_path, monkeypatch, {"12": [1, "build\tfail\t1m"], "5": [0, "x\tpass"]})
+    code, o, _ = out(capsys, "ci", "xr", "--grace", "0")
+    assert code == 1 and "api#12: build\tfail\t1m" in o and o.endswith("ci: fail")
+
+
+def test_ws_ci_pending_beats_pass(ws_feature, tmp_path, monkeypatch, capsys):
+    set_status(ws_feature[1], pr="5", repo_prs="api#12")
+    gh_checks(tmp_path, monkeypatch, {"12": [8, "build\tpending"], "5": [0, "x\tpass"]})
+    assert out(capsys, "ci", "xr", "--grace", "0")[:2] == (0, "ci: pending")
+
+
+def test_ws_ci_without_workspace_pr(ws_feature, tmp_path, monkeypatch, capsys):
+    set_status(ws_feature[1], pr="none", repo_prs="api#12")
+    gh_checks(tmp_path, monkeypatch, {"12": [0, "build\tpass"]})
+    assert out(capsys, "ci", "xr", "--grace", "0")[:2] == (0, "ci: pass")
+
+
+def test_pr_body_repo_merge_order(ws_feature, capsys):
+    wt, fd = ws_feature
+    (fd / "plan.md").write_text((fd / "plan.md").read_text() + "\n## Files\n- `app/x` — modify — y\n")
+    assert at.main(["repos", "xr", "--ensure"]) == 0
+    set_status(fd, pr="none", repo_prs="api#12")
+    o = out(capsys, "pr-body", "xr", "--repo", "app", "--summary", "S")[1]
+    assert "## Summary\nS" in o and "Part of `xr`: api#12" in o
+    assert "Merge order: api#12 → app (this PR) → workspace PR (agent-team artifacts)" in o
+    assert "spec.md" in o
+    ws = out(capsys, "pr-body", "xr", "--summary", "S")[1]
+    assert "## Product PRs" in ws and "- api#12" in ws
+
+
+def test_pr_body_unknown_repo_fails(ws_feature, capsys):
+    code, _, err = out(capsys, "pr-body", "xr", "--repo", "nope")
+    assert code == 1 and "nope" in err
+
+
+def test_summary_shows_repo_prs(ws_feature, capsys):
+    wt, fd = ws_feature
+    set_status(fd, pr="5", repo_prs="api#12")
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "st", cwd=wt)
+    sh("git", "push", "-q", "-u", "origin", "feature/xr", cwd=wt)
+    assert "| api#12 ws#5 |" in out(capsys, "summary")[1]
