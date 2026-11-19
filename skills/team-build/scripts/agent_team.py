@@ -33,7 +33,7 @@ POLL_SECONDS = 15
 TIERS = ("deep", "standard", "fast")
 STAGES = ("spec", "grill", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
 STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
-               "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro")
+               "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro", "repos", "repo_prs")
 IDEA_STATUSES = ("proposed", "shipped", "rejected")   # in progress = a feature/<slug> branch exists
 LEASE_TTL_HOURS = 6   # a lease older than this (no log/commit since) counts as abandoned
 BIG_DIFF_LINES, BIG_DIFF_FILES = 400, 15
@@ -164,6 +164,11 @@ def status_path(slug):
 def work_dir(slug):
     wt = worktree(slug)
     return wt if wt.exists() else repo_root()
+
+
+def product_wt(slug, path):
+    """A product repo's worktree for a feature: nested in the workspace worktree at the same relative path."""
+    return worktree(slug) / path
 
 
 def default_branch(root=None):
@@ -398,6 +403,13 @@ def append_log(path, line):
     if "## Log" not in text:
         text += "\n## Log\n"
     path.write_text(text.rstrip("\n") + "\n" + line + "\n")
+
+
+def status_repos(slug):
+    """Workspace mode: the ## Repos entries this feature touches (status.md `repos`), in order; [] otherwise."""
+    p = status_path(slug)
+    names = read_status(p).get("repos", "none").split() if p.exists() else []
+    return [r for r in repos() if r["path"] in names] if names and names != ["none"] else []
 
 
 # ---------- models / tiers ----------
@@ -751,6 +763,9 @@ def cmd_lease(a):
     if not wt.exists():
         raise Fail(f"no worktree at {wt}")
     _catch_up(wt, branch)
+    for r in status_repos(a.slug):
+        if product_wt(a.slug, r["path"]).exists():
+            _catch_up(product_wt(a.slug, r["path"]), branch)
     p = feature_dir(wt, a.slug) / "status.md"
     owner = read_status(p).get("owner", "none")
     host, _, when = owner.partition(" ")
@@ -851,10 +866,61 @@ def cmd_rules(a):
     print("\n".join(found) if found else "none")
 
 
+def _ensure_product(slug, r):
+    """Create the product worktree for a feature: from origin/feature/<slug> if it exists (resume), else a new
+    branch off the repo's base, pushed right away."""
+    wt, pw, branch = worktree(slug), product_wt(slug, r["path"]), f"feature/{slug}"
+    if run(["git", "check-ignore", "-q", r["path"] + "/"], cwd=wt, check=False).returncode:   # "/": may not exist yet
+        raise Fail(f"{r['path']} isn't gitignored by the workspace (add /{r['path']}/ to .gitignore); "
+                   f"not creating its worktree inside the workspace worktree")
+    d = repo_dir(r["path"])
+    git("fetch", "-q", "origin", cwd=d)
+    local = git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=d, check=False)
+    remote = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=d, check=False)
+    if local:
+        git("worktree", "add", "-q", str(pw), branch, cwd=d)
+        if remote:
+            _catch_up(pw, branch)
+    elif remote:
+        git("worktree", "add", "-q", "--track", "-b", branch, str(pw), f"origin/{branch}", cwd=d)
+    else:
+        git("worktree", "add", "-q", "-b", branch, str(pw), f"origin/{repo_branch(r)}", cwd=d)
+    if not remote:
+        r_ = run(["git", "push", "-q", "-u", "origin", branch], cwd=pw, check=False)
+        if r_.returncode:
+            raise Fail(f"{r['path']}: pushing {branch} failed: {_last_line(r_)}")
+
+
 def cmd_repos(a):
     rs = repos()
     if not rs:
         print("single-repo")
+        return 0
+    if a.slug:
+        if not worktree(a.slug).exists():
+            raise Fail(f"no worktree at {worktree(a.slug)}")
+        try:
+            idea = idea_info(a.slug)["repos"]
+        except Fail:
+            idea = []
+        plan = feature_dir(worktree(a.slug), a.slug) / "plan.md"
+        files = plan_files(plan.read_text()) if plan.exists() else []
+        want = {r["path"] for r in status_repos(a.slug)} | set(idea) | \
+            {r["path"] for r in rs if any(f == r["path"] or f.startswith(r["path"] + "/") for f in files)}
+        for name in sorted(want - {r["path"] for r in rs}):
+            print(f"{name}: not in ## Repos, skipped")
+        touched = [r for r in rs if r["path"] in want]
+        for r in touched:
+            exists = product_wt(a.slug, r["path"]).exists()
+            if a.ensure and not exists:
+                _ensure_product(a.slug, r)
+            print(f"{r['path']} {'exists' if exists else 'created' if a.ensure else 'missing'}")
+        if a.ensure:
+            sp = status_path(a.slug)
+            updates = {"repos": " ".join(r["path"] for r in touched) or "none"}
+            if "repo_prs" not in read_status(sp):
+                updates["repo_prs"] = "none"
+            write_status(sp, updates)
         return 0
     for r in rs:
         d = repo_dir(r["path"])
@@ -1519,8 +1585,9 @@ def build_parser():
     s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
     s = sub.add_parser("rules", help="the repo's AGENTS.md/CLAUDE.md files governing a feature's or some paths' code")
     s.add_argument("targets", nargs="*", metavar="SLUG|PATH"); s.set_defaults(fn=cmd_rules)
-    s = sub.add_parser("repos", help="workspace mode: the product repos in project.md ## Repos")
-    s.set_defaults(fn=cmd_repos)
+    s = sub.add_parser("repos", help="workspace mode: the product repos in project.md ## Repos; with a slug, the "
+                                   "feature's product worktrees (--ensure creates missing ones)")
+    s.add_argument("slug", nargs="?"); s.add_argument("--ensure", action="store_true"); s.set_defaults(fn=cmd_repos)
     s = sub.add_parser("audit-path", help="next free audit report path, and earlier audit reports")
     s.add_argument("--date", help="YYYY-MM-DD (default: today, UTC)"); s.set_defaults(fn=cmd_audit_path)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")

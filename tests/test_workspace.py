@@ -133,3 +133,86 @@ def test_idea_repos_line(workspace, capsys):
     assert at.idea_info("tiny")["repos"] == []
     assert out(capsys, "idea", "xr")[1] == "status=proposed effort=M repos=api,app"
     assert out(capsys, "idea", "tiny")[1] == "status=proposed effort=S"
+
+
+# ---------- Task 6: product worktrees, status keys, lease ----------
+
+XR_IDEA = "\n### xr — Cross\n- **Repos:** api\n- **Value:** H · **Effort:** M · **Risk:** x\n"
+
+
+@pytest.fixture
+def feature(workspace, capsys):
+    """Workspace feature 'xr' (idea touches api) with its workspace worktree and status.md committed."""
+    i = workspace / ".agent-team" / "ideas.md"
+    i.write_text(i.read_text() + XR_IDEA)
+    sh("git", "commit", "-qam", "idea", cwd=workspace); sh("git", "push", "-q", cwd=workspace)
+    wt, fd = new_feature(workspace, "xr", capsys)
+    return wt, fd
+
+
+def branches(repo_dir, remote=False):
+    ref = "refs/remotes/origin/feature/" if remote else "refs/heads/feature/"
+    return sh("git", "for-each-ref", "--format=%(refname:short)", ref, cwd=repo_dir).split()
+
+
+def test_ensure_creates_product_worktrees_from_idea(feature, workspace, capsys):
+    wt, fd = feature
+    code, o, err = out(capsys, "repos", "xr", "--ensure")
+    assert code == 0, err
+    assert o == "api created"
+    assert sh("git", "branch", "--show-current", cwd=wt / "api") == "feature/xr"
+    sh("git", "fetch", "-q", "origin", cwd=workspace / "api")
+    assert branches(workspace / "api", remote=True) == ["origin/feature/xr"]
+    st = at.read_status(fd / "status.md")
+    assert st["repos"] == "api" and st["repo_prs"] == "none"
+    assert out(capsys, "repos", "xr", "--ensure")[1] == "api exists"
+
+
+def test_ensure_adds_plan_repos(feature, capsys):
+    wt, fd = feature
+    (fd / "plan.md").write_text((fd / "plan.md").read_text() + "\n## Files\n- `app/lib/x.dart` — modify — y\n")
+    assert out(capsys, "repos", "xr", "--ensure")[1] == "api created\napp created"
+    assert at.read_status(fd / "status.md")["repos"] == "api app"
+
+
+def test_ensure_reuses_remote_branch(feature, workspace, capsys):
+    wt, fd = feature
+    assert at.main(["repos", "xr", "--ensure"]) == 0
+    (wt / "api" / "new.txt").write_text("x\n")
+    sh("git", "add", "-A", cwd=wt / "api"); sh("git", "commit", "-qm", "work", cwd=wt / "api")
+    sh("git", "push", "-q", "origin", "feature/xr", cwd=wt / "api")
+    head = sh("git", "rev-parse", "HEAD", cwd=wt / "api")
+    sh("git", "worktree", "remove", "--force", str(wt / "api"), cwd=workspace / "api")   # another machine: no local copy
+    sh("git", "branch", "-D", "feature/xr", cwd=workspace / "api")
+    assert out(capsys, "repos", "xr", "--ensure")[1] == "api created"
+    assert sh("git", "rev-parse", "HEAD", cwd=wt / "api") == head
+
+
+def test_ensure_refuses_unignored_path(feature, capsys):
+    wt, fd = feature
+    (wt / ".gitignore").write_text(".agent-team/worktrees/\n/app/\n")
+    code, _, err = out(capsys, "repos", "xr", "--ensure")
+    assert code == 1 and "api" in err and "gitignore" in err
+    assert not (wt / "api").exists()
+
+
+def test_lease_catches_up_products(feature, workspace, tmp_path, capsys):
+    wt, fd = feature
+    assert at.main(["repos", "xr", "--ensure"]) == 0
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt); sh("git", "push", "-q", "-u", "origin", "feature/xr", cwd=wt)
+    other = tmp_path / "other-api"
+    sh("git", "clone", "-q", "-b", "feature/xr", str(tmp_path / "api.git"), str(other), cwd=tmp_path)
+    sh("git", "config", "user.email", "o@o", cwd=other); sh("git", "config", "user.name", "o", cwd=other)
+    (other / "o.txt").write_text("o\n"); sh("git", "add", "-A", cwd=other); sh("git", "commit", "-qm", "o", cwd=other)
+    sh("git", "push", "-q", cwd=other)
+    (wt / "api" / "l.txt").write_text("l\n"); sh("git", "add", "-A", cwd=wt / "api"); sh("git", "commit", "-qm", "l", cwd=wt / "api")
+    code, _, err = out(capsys, "lease", "xr", "acquire")
+    assert code == 1 and "diverged" in err
+
+
+def test_single_repo_status_and_ensure_unchanged(repo, capsys):
+    wt, fd = new_feature(repo)
+    before = (fd / "status.md").read_text()
+    assert "repos:" not in before
+    assert out(capsys, "repos", "tiny", "--ensure")[1] == "single-repo"
+    assert (fd / "status.md").read_text() == before
