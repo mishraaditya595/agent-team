@@ -14,7 +14,7 @@ spec: `.agent-team/features/<slug>/spec.md` · modelled on: <existing feature/pa
 <Where data comes from, how it moves, where it's stored. A small ASCII diagram if it helps.>
 
 ## Global constraints
-<!-- The spec's hard values, copied verbatim: limits, copy text, version floors, platform rules. Every task obeys these. "none" if there are none. -->
+<!-- The spec's hard values, copied verbatim: limits, copy text, version floors, platform rules. Then the repo rules (`agent-team rules <paths>`) this change could break, as `<rule> (source: <path>)`. Every task obeys these. "none" if there are none. -->
 - <constraint>
 
 ## Edge cases

@@ -507,3 +507,14 @@ def test_audit_date_comes_from_report_name():
     assert "today's date" not in wf and "date in the report file name" in wf
     assert "date in the report file name" in read("skills/tech-lead/SKILL.md")
     assert "team-audit [quick\\|deep] [<category>]" in read("README.md")
+
+
+def test_roles_read_repo_rules():
+    for role in ("tech-lead", "reviewer", "pm"):
+        assert "agent-team rules" in read(f"skills/{role}/SKILL.md"), role
+    assert "(source:" in read("skills/tech-lead/SKILL.md") + read("skills/tech-lead/references/plan-template.md")
+    assert "git show origin/" in read("skills/reviewer/SKILL.md")
+    for f in ("skills/developer/SKILL.md", "skills/qa/SKILL.md"):
+        assert "rules file" in read(f), f
+    for f in ("skills/engineering-guidelines/SKILL.md", "AGENTS.md"):
+        assert "agent-team rules" in read(f) and "never override" in read(f), f

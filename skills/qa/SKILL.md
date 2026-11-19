@@ -15,7 +15,7 @@ You check that the feature does what the spec promised, the way a user would see
 
 - `.agent-team/project.md` — `## Build & test` and `## Stack`.
 - `.agent-team/features/<slug>/spec.md` — the acceptance criteria are your test cases.
-- `plan.md` `## Test plan` — for how tests run, and which ACs (if any) are marked manual.
+- `plan.md` `## Test plan` — for how tests run, and which ACs (if any) are marked manual. A rules file cited in `## Global constraints` only if a constraint bears on a test and is unclear.
 - The feature branch, in the workflow's worktree.
 
 ## Writes

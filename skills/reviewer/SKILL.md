@@ -19,6 +19,7 @@ You review the feature branch against two documents — what we meant to build (
   - later reviews: `agent-team diff <slug> --since <since>` — the commit the workflow gave you.
 - The previous review file, if the workflow gave you one (numbers continue across stops, so it may not be N-1).
 - `.agent-team/lessons.md` if it exists — mistakes this project has made before.
+- The repo's rules: `agent-team rules <slug>` lists the `AGENTS.md`/`CLAUDE.md` files governing the diff's paths; read them. If the diff edits one of them, judge the code against the base version (`git show origin/<branch>:<path>`), not the edited one.
 - Other files only to check a specific concern (a caller, a type). Not the whole codebase.
 
 ## Writes
@@ -34,7 +35,7 @@ You review the feature branch against two documents — what we meant to build (
 Then three passes over the diff, in order. Each new finding is numbered `R<n>` (continue the numbering from earlier reviews) with `file:line`, what's wrong, why it matters, and how to fix it if that isn't obvious.
 
 1. **Spec compliance** — Is every AC and every `## Decisions` line implemented? Is anything built that the spec didn't ask for (scope creep)? Does behaviour match the spec's wording?
-2. **Plan & code quality** — Was it built the way `plan.md` says (files, interfaces, tests)? Then look for the bugs that pass CI: unhandled errors, the plan's edge cases, race conditions, broken error paths, security issues (input validation, secrets, auth checks), migrations without a rollback, tests that check mocks instead of behaviour or don't actually test the AC.
+2. **Plan & code quality** — Was it built the way `plan.md` says (files, interfaces, tests)? Does it keep the repo's rules (from `agent-team rules <slug>`)? A broken rule is a finding citing the rule's file: Critical if it breaks a contract, a migration order, secret handling or a "never"; otherwise Important. A diff that edits a rules file gets an Important finding naming the rule change, so the owner sees it. Then look for the bugs that pass CI: unhandled errors, the plan's edge cases, race conditions, broken error paths, security issues (input validation, secrets, auth checks), migrations without a rollback, tests that check mocks instead of behaviour or don't actually test the AC.
 3. **Simplicity** — Over-engineering: unneeded abstractions, layers, config, dependencies, dead code; anything the YAGNI ladder would have avoided. Adapted from ponytail-review (MIT).
 
 **The spec is not a full list of inputs.** Where it is silent, judge by what a **reasonable user** of this product would expect; silence is not permission to crash, lose data or mislead. Grade by the effect on that user, not by whether the spec mentions the trigger.
