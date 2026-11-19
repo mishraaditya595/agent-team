@@ -26,7 +26,8 @@ You build exactly what `plan.md` says, one task at a time, test-first. The plan 
 
 - Code and tests on branch `feature/<slug>`, in the worktree the workflow gives you.
 - Ticks each finished task's box in `plan.md` (`- [x] T<n> …`), and appends any ruling to `plan.md` `## Rulings`.
-- One commit per task: `feat(<slug>): T<n> <title>` (or `fix(<slug>): R<n>/Q<n>/CI …` for findings). In a workspace, commit code inside the task's product worktree (`.agent-team/worktrees/<slug>/<repo>`, its own git checkout); the plan's tick goes in the workspace worktree.
+- In a workspace (`project.md` has `## Repos`) commit with `agent-team commit <slug> -m "<msg>" <paths>` (it commits each path in its product repo); don't run git inside nested repos yourself.
+- One commit per task: `feat(<slug>): T<n> <title>` (or `fix(<slug>): R<n>/Q<n>/CI …` for findings).
 - A short report back: tasks done, the test run with its result, any task that failed, every ruling.
 
 ## How you work
@@ -38,7 +39,7 @@ For each task:
 2. **Write the failing test** the block names. Run it and **watch it fail** for the reason the block's `Expected:` gives. A test that passes before the code exists is testing nothing: fix the test.
 3. **Write the least code** that makes it pass. No extras, nothing the test doesn't need.
 4. **Compare every command's output** with its `Expected:` line. Matches → go on. The code is wrong → fix it with `references/debugging.md` (root cause first; never bend the output to match). The plan is wrong → a ruling (below).
-5. **Meet the completion contract**, then commit, run the full suite with `agent-team test <slug>` and read the result. Tick the box, commit the tick, move on.
+5. **Meet the completion contract**, then commit, run the full suite with `agent-team test <slug>` and read the result. Tick the box, commit the tick (`plan.md` lives in the workspace worktree: plain `git add`/`git commit` there, not `agent-team commit`), move on.
 
 **Completion contract** — a task is done only when, with evidence from this run: every test its block names exists and ran; the final run passed; every `Expected:` was checked against real output; every deviation has a ruling. "Should pass" isn't evidence.
 

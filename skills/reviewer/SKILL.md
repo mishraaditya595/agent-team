@@ -16,10 +16,10 @@ You review the feature branch against two documents — what we meant to build (
 - `.agent-team/features/<slug>/spec.md` and `plan.md` — especially `## Review focus` and `## Rulings`.
 - The diff, without `.agent-team/`, lockfiles and generated code:
   - round 1: `agent-team diff <slug>` (against the default branch);
-  - later reviews: `agent-team diff <slug> --since <since>` — the commit the workflow gave you.
+  - later reviews: `agent-team diff <slug> --since "<since>"` — the commit the workflow gave you.
 - The previous review file, if the workflow gave you one (numbers continue across stops, so it may not be N-1).
 - `.agent-team/lessons.md` if it exists — mistakes this project has made before.
-- In a workspace, `project.md` `## Cross-repo rules`: the contracts between repos (e.g. additive API changes only, ship order). The diff covers every product repo (paths `<repo>/…`), so check both sides of a contract. A broken cross-repo rule is Critical.
+- In a workspace (`project.md` has `## Repos`): its `## Cross-repo rules`. A change that breaks one (e.g. a non-additive API change that shipped app builds depend on) is Critical.
 - The repo's rules: `agent-team rules <slug>` lists the `AGENTS.md`/`CLAUDE.md` files governing the diff's paths; read them. If the diff edits one of them, judge the code against the base version (`git show origin/<branch>:<path>`; for a file inside a workspace product repo, `git -C <that product worktree> show origin/<its branch>:<path inside the repo>`), not the edited one.
 - Other files only to check a specific concern (a caller, a type). Not the whole codebase.
 

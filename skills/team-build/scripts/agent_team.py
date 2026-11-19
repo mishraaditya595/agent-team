@@ -32,9 +32,8 @@ POLL_SECONDS = 15
 
 TIERS = ("deep", "standard", "fast")
 STAGES = ("spec", "grill", "plan", "implement", "review", "qa", "pr", "ci", "pr-open", "merged", "marketed", "stopped")
-STATUS_KEYS = ("stage", "branch", "pr", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
+STATUS_KEYS = ("stage", "branch", "pr", "repos", "repo_prs", "owner", "worktree", "grill_round", "review_round", "qa_round", "ci_round",
                "last_reviewed_commit", "tests", "stop_reason", "stopped_at", "retro")
-WORKSPACE_STATUS_KEYS = ("repos", "repo_prs")   # not in status-template.md: `repos --ensure` adds them in a workspace
 IDEA_STATUSES = ("proposed", "shipped", "rejected")   # in progress = a feature/<slug> branch exists
 LEASE_TTL_HOURS = 6   # a lease older than this (no log/commit since) counts as abandoned
 BIG_DIFF_LINES, BIG_DIFF_FILES = 400, 15
@@ -59,11 +58,6 @@ class Fail(Exception):
 # ---------- small helpers ----------
 
 def run(cmd, cwd=None, check=True, shell=False):
-    if cwd and not Path(cwd).is_dir():     # else subprocess blames the binary ("command not found")
-        msg = f"no folder {cwd} (a workspace product worktree? `agent-team repos <slug> --ensure` re-creates it)"
-        if check:
-            raise Fail(msg)
-        return subprocess.CompletedProcess(cmd, 1, "", msg)
     try:
         r = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, shell=shell)
     except FileNotFoundError:
@@ -170,11 +164,6 @@ def status_path(slug):
 def work_dir(slug):
     wt = worktree(slug)
     return wt if wt.exists() else repo_root()
-
-
-def product_wt(slug, path):
-    """A product repo's worktree for a feature: nested in the workspace worktree at the same relative path."""
-    return worktree(slug) / path
 
 
 def default_branch(root=None):
@@ -306,9 +295,9 @@ def project_md():
     return text
 
 
-def block_command(block, name):
-    """`- Test: `cmd`` from a block of project.md text; None when missing or 'none'."""
-    m = re.search(rf"^\s*-\s*{name}:\s*`([^`]+)`", block, re.M | re.I)
+def block_command(name, body):
+    """`- Test: `cmd`` in a block of text; None when missing or 'none'."""
+    m = re.search(rf"^\s*-\s*{name}:\s*`([^`]+)`", body, re.M | re.I)
     if not m or m.group(1).strip().lower().startswith("none"):
         return None
     return m.group(1).strip()
@@ -316,38 +305,33 @@ def block_command(block, name):
 
 def project_command(name, text=None):
     """`- Test: `cmd`` from project.md ## Build & test; None when missing or 'none'."""
-    return block_command(section(text if text is not None else project_md(), "Build & test"), name)
+    return block_command(name, section(text if text is not None else project_md(), "Build & test"))
 
 
 def repos(text=None):
-    """Workspace mode: the product repos under project.md ## Repos (one `### <path>` block each), ordered by
-    ## Cross-repo rules `Order:` then listing order. [] in a single-repo project."""
-    text = text if text is not None else project_md()
+    """Nested product repos from project.md ## Repos ([] = single-repo), `- Order:` in ## Cross-repo rules first."""
+    text = project_md() if text is None else text
+    parts = re.split(r"^###\s+(.+?)\s*$", section(text, "Repos"), flags=re.M)[1:]
     out = []
-    for m in re.finditer(r"^###\s+(\S+)[^\n]*\n?(.*?)(?=^###\s|\Z)", section(text, "Repos"), re.M | re.S):
-        block = m.group(2)
-        if Path(m.group(1)).is_absolute() or ".." in Path(m.group(1)).parts:
-            raise Fail(f"## Repos path {m.group(1)} is outside the workspace; use a folder inside it")
-        field = lambda k: (re.search(rf"^\s*-\s*{k}:\s*`?([^`\n]*?)`?\s*$", block, re.M | re.I) or [None, None])[1]
-        out.append({"path": m.group(1).strip("`/"), "role": field("Role") or "", "branch": field("Branch") or None,
-                    "block": block})
-    om = re.search(r"^\W*Order:\s*(.+)$", section(text, "Cross-repo rules"), re.M | re.I)
-    order = [p.strip(" `/") for p in om.group(1).split(",")] if om else []
-    rank = lambda r: order.index(r["path"]) if r["path"] in order else len(order)
-    return sorted(out, key=rank)    # stable: unlisted repos keep their listing order
+    for heading, body in zip(parts[::2], parts[1::2]):
+        path = heading.split()[0]
+        if path.startswith("/") or "/" in path or ".." in path:
+            raise Fail(f"project.md ## Repos: '### {heading}' must be a repo directory directly under the workspace root")
+        f = lambda k: (m.group(1).strip() if (m := re.search(rf"^\s*-\s*{k}:\s*(.+)$", body, re.M | re.I)) else None)
+        out.append({"path": path, "role": f("Role") or "", "branch": f("Branch"), "body": body})
+    m = re.search(r"^\s*-\s*Order:\s*(.+)$", section(text, "Cross-repo rules"), re.M | re.I)
+    order = [p.strip() for p in m.group(1).split(",")] if m else []
+    return sorted(out, key=lambda r: order.index(r["path"]) if r["path"] in order else len(order))  # stable
 
 
 def repo_branch(r):
     return r["branch"] or default_branch(repo_root() / r["path"])
 
 
-def repo_dir(path):
-    """The workspace's clone of a product repo; Fail unless it's a git repo's top level."""
-    d = repo_root() / path
-    top = git("rev-parse", "--show-toplevel", cwd=d, check=False) if d.is_dir() else ""
-    if not top or Path(top).resolve() != d.resolve():
-        raise Fail(f"{path} (## Repos in project.md) isn't a git repo at {d}")
-    return d
+def gh_slug(cwd):
+    url = git("remote", "get-url", "origin", cwd=cwd, check=False)
+    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+    return m.group(1) if m else ""
 
 
 def docs_pr_only(text):
@@ -381,8 +365,8 @@ def read_status(path):
 
 def check_status_values(updates):
     for k, v in updates.items():
-        if k not in STATUS_KEYS + WORKSPACE_STATUS_KEYS:
-            raise Fail(f"unknown status key '{k}' (known: {', '.join(STATUS_KEYS + WORKSPACE_STATUS_KEYS)})")
+        if k not in STATUS_KEYS:
+            raise Fail(f"unknown status key '{k}' (known: {', '.join(STATUS_KEYS)})")
         if k in ("stage", "stopped_at") and v not in STAGES and not (k == "stopped_at" and v == "none"):
             raise Fail(f"unknown stage '{v}' (known: {', '.join(STAGES)})")
         if k.endswith("_round") and not v.isdigit():
@@ -411,13 +395,6 @@ def append_log(path, line):
     if "## Log" not in text:
         text += "\n## Log\n"
     path.write_text(text.rstrip("\n") + "\n" + line + "\n")
-
-
-def status_repos(slug):
-    """Workspace mode: the ## Repos entries this feature touches (status.md `repos`), in order; [] otherwise."""
-    p = status_path(slug)
-    names = read_status(p).get("repos", "none").split() if p.exists() else []
-    return [r for r in repos() if r["path"] in names] if names and names != ["none"] else []
 
 
 # ---------- models / tiers ----------
@@ -583,9 +560,9 @@ def idea_info(slug):
         if block:
             st = re.search(r"\*\*Status:\*\*\s*(\w+)", block)
             eff = re.search(r"\*\*Effort:\*\*\s*([SML])", block)
-            rp = re.search(r"\*\*Repos:\*\*\s*(.+)$", block, re.M)
-            return {"status": st.group(1) if st else "proposed", "effort": eff.group(1) if eff else None,
-                    "repos": [p.strip(" `/") for p in rp.group(1).split(",") if p.strip(" `/")] if rp else []}
+            rp = re.search(r"\*\*Repos:\*\*[ \t]*(.+)", block)
+            repos = [r.strip() for r in rp.group(1).split(",") if r.strip()] if rp else []
+            return {"status": st.group(1) if st else "proposed", "effort": eff.group(1) if eff else None, "repos": repos}
     raise Fail(f"unknown slug '{slug}': not in .agent-team/ideas.md")
 
 
@@ -614,47 +591,28 @@ def exclude_specs(project_text=""):
     return [":(exclude).agent-team"] + [f":(exclude,glob){p}" for p in pats if p.lower() != "none"]
 
 
-def parse_since(since):
-    """last_reviewed_commit: a plain SHA (single repo, or the workspace itself) → {".": sha};
-    workspace form "api:abc app:def" → {"api": "abc", "app": "def"}; none → {}."""
-    if not since or since == "none":
-        return {}
-    if ":" not in since:
-        return {".": since}
-    return dict(p.split(":", 1) for p in since.split() if ":" in p)
-
-
 def diff_args(slug, since=None):
-    since = parse_since(since).get(".")
     rng = f"{since}..HEAD" if since else f"origin/{default_branch()}...HEAD"
     return [rng, "--", ".", *exclude_specs(project_md())]
 
 
-def repo_diff(slug, r, since_map, extra):
-    """One product repo's part of the feature diff, paths shown as <repo>/…"""
-    since = since_map.get(r["path"])
-    rng = f"{since}..HEAD" if since else f"origin/{repo_branch(r)}...HEAD"
-    pre = [f"--src-prefix=a/{r['path']}/", f"--dst-prefix=b/{r['path']}/"] if not extra or extra == ["--unified=3"] else []
-    out = git("diff", *extra, *pre, rng, "--", ".", *exclude_specs(project_md()), cwd=product_wt(slug, r["path"]))
-    if extra == ["--name-only"]:
-        return "\n".join(f"{r['path']}/{l}" for l in out.splitlines() if l)
+def ws_diffs(slug, since=None):
+    """Workspace mode: [(repo, git diff args)] with per-repo --since ranges and repo-prefixed paths."""
+    since, ex, out = parse_since(since), exclude_specs(project_md()), []
+    for r in ws_repos(slug):
+        rng = f"{since[r['path']]}..HEAD" if isinstance(since, dict) and r["path"] in since else \
+            f"{since}..HEAD" if isinstance(since, str) else f"origin/{repo_branch(r)}...HEAD"
+        out.append((r, [f"--src-prefix=a/{r['path']}/", f"--dst-prefix=b/{r['path']}/", rng, "--", ".", *ex]))
     return out
 
 
-def _shortstat(out):
-    files = re.search(r"(\d+) files? changed", out)
-    ins = re.search(r"(\d+) insertions?", out)
-    dels = re.search(r"(\d+) deletions?", out)
-    n = lambda m: int(m.group(1)) if m else 0
-    return n(ins) + n(dels), n(files)
-
-
 def diffstat(slug, since=None):
-    lines, files = _shortstat(git("diff", "--shortstat", *diff_args(slug, since), cwd=work_dir(slug)))
-    for r in status_repos(slug) if slug else []:
-        l, f = _shortstat(repo_diff(slug, r, parse_since(since), ["--shortstat"]))
-        lines, files = lines + l, files + f
-    return lines, files
+    if ws_repos(slug):
+        outs = [git("diff", "--shortstat", *args, cwd=r["wt"]) for r, args in ws_diffs(slug, since)]
+    else:
+        outs = [git("diff", "--shortstat", *diff_args(slug, since), cwd=work_dir(slug))]
+    n = lambda pat: sum(int(m.group(1)) for o in outs if (m := re.search(pat, o)))
+    return n(r"(\d+) insertions?") + n(r"(\d+) deletions?"), n(r"(\d+) files? changed")
 
 
 def code_key(wt):
@@ -663,6 +621,62 @@ def code_key(wt):
     if dirty:
         return None
     return git("log", "-1", "--format=%h", "--", ".", ":(exclude).agent-team", cwd=wt) or None
+
+
+def task_files(plan):
+    """Paths from each ## Tasks checkbox line's `files: a, b` segment (up to the next ' — ')."""
+    out = []
+    for line in section(plan, "Tasks").splitlines():
+        m = CHECKBOX.match(line) and re.search(r"files:\s*(.+?)(?:\s+—\s|$)", line)
+        out += [p.strip().strip("`") for p in m.group(1).split(",") if p.strip()] if m else []
+    return out
+
+
+def ws_repos(slug, ready=True):
+    """Touched product repos of a workspace feature (status `repos`), with their worktree and source paths.
+    ready: fail clearly when a product worktree is missing (e.g. another machine added the repo)."""
+    sp = status_path(slug)
+    names = read_status(sp).get("repos", "none").split() if sp.exists() else []
+    out = [{**r, "wt": worktree(slug) / r["path"], "src": repo_root() / r["path"]}
+           for r in repos() if r["path"] in names]
+    for r in out:
+        if ready and not r["wt"].exists():
+            raise Fail(f"{r['path']}: no product worktree; run agent-team repos {slug} --ensure")
+    return out
+
+
+def ensure_repo_worktrees(slug):
+    """Nest one worktree per touched product repo at <wt>/<path> on feature/<slug>; record them in status `repos`."""
+    wt, sp = worktree(slug), status_path(slug)
+    plan = feature_dir(wt, slug) / "plan.md"
+    paths = task_files(plan.read_text()) if plan.exists() else []
+    want = set(read_status(sp).get("repos", "none").split()) | set(idea_info(slug)["repos"] or [])
+    rs = [r for r in repos() if r["path"] in want or any(p.startswith(r["path"] + "/") for p in paths)]
+    branch = f"feature/{slug}"
+    for r in rs:
+        dest, src = wt / r["path"], repo_root() / r["path"]
+        if dest.exists():   # a failed push last time leaves the worktree but no remote branch
+            if not git("ls-remote", "--heads", "origin", branch, cwd=src):
+                git("push", "-q", "-u", "origin", branch, cwd=dest)
+            continue
+        if run(["git", "check-ignore", "-q", f"{r['path']}/"], cwd=wt, check=False).returncode:
+            raise Fail(f"{r['path']} is not gitignored by the workspace; add /{r['path']}/ to .gitignore")
+        local = run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"], cwd=src, check=False).returncode == 0
+        git("worktree", "prune", cwd=src)     # a removed worktree dir still registers the branch as checked out
+        if git("ls-remote", "--heads", "origin", branch, cwd=src):
+            git("fetch", "-q", "origin", branch, cwd=src)
+            git("worktree", "add", "-q", *(() if local else ("--track", "-b", branch)), str(dest),
+                *((branch,) if local else (f"origin/{branch}",)), cwd=src)
+            if local:       # the local branch may be behind what another machine pushed
+                _catch_up(dest, branch)
+        else:
+            base = repo_branch(r)
+            git("fetch", "-q", "origin", base, cwd=src)
+            git("worktree", "add", "-q", *((str(dest), branch) if local else ("-b", branch, str(dest), f"origin/{base}")), cwd=src)
+            git("push", "-q", "-u", "origin", branch, cwd=dest)
+    names = [r["path"] for r in rs]
+    write_status(sp, {"repos": " ".join(names) or "none"})
+    return names
 
 
 # ---------- agent rules (the repo's own AGENTS.md / CLAUDE.md) ----------
@@ -711,10 +725,11 @@ def rule_files(root, paths, fallback=None):
 
 
 def feature_paths(slug):
-    """Files the feature touches: its diff plus the plan's ## Files (which may not exist yet)."""
+    """Files the feature touches: its diff (every product repo's, as <repo>/…, in a workspace) plus the
+    plan's ## Files (which may not exist yet)."""
     paths = git("diff", "--name-only", *diff_args(slug), cwd=work_dir(slug)).splitlines()
-    for r in status_repos(slug):
-        paths += repo_diff(slug, r, {}, ["--name-only"]).splitlines()
+    for r, args in (ws_diffs(slug) if ws_repos(slug, ready=False) else []):
+        paths += [f"{r['path']}/{f}" for f in git("diff", "--name-only", *args, cwd=r["wt"]).splitlines() if f]
     plan = feature_dir(work_dir(slug), slug) / "plan.md"
     return list(dict.fromkeys(paths + (plan_files(plan.read_text()) if plan.exists() else [])))
 
@@ -723,6 +738,25 @@ def feature_paths(slug):
 
 def cmd_default_branch(a):
     print(default_branch())
+
+
+def cmd_repos(a):
+    rs = repos()
+    if not rs:
+        print("single-repo (no ## Repos)")
+        return
+    if a.ensure:
+        if not a.slug:
+            raise Fail("repos --ensure needs a slug")
+        print("repos: " + " ".join(ensure_repo_worktrees(a.slug)))
+        return
+    for r in rs:
+        d = repo_root() / r["path"]
+        if not d.is_dir() or Path(git("rev-parse", "--show-toplevel", cwd=d, check=False) or "/").resolve() != d.resolve():
+            raise Fail(f"{r['path']}: not a git repo at {d}")
+        print(f"{r['path']} branch={repo_branch(r)} repo={gh_slug(d) or '-'} head={git('rev-parse', '--short', 'HEAD', cwd=d)}")
+        if a.log:
+            print(git("log", "--oneline", "-30", cwd=d))
 
 
 def cmd_init_status(a):
@@ -802,9 +836,9 @@ def cmd_lease(a):
     if not wt.exists():
         raise Fail(f"no worktree at {wt}")
     _catch_up(wt, branch)
-    for r in status_repos(a.slug):
-        if product_wt(a.slug, r["path"]).exists():
-            _catch_up(product_wt(a.slug, r["path"]), branch)
+    for r in ws_repos(a.slug, ready=False):
+        if r["wt"].exists():
+            _catch_up(r["wt"], branch)
     p = feature_dir(wt, a.slug) / "status.md"
     owner = read_status(p).get("owner", "none")
     host, _, when = owner.partition(" ")
@@ -870,17 +904,15 @@ def cmd_tasks(a):
 
 
 def cmd_drift(a):
+    if repos():
+        print("drift: unchecked (workspace mode)")
+        return 0
     wt = work_dir(a.slug)
     plan = feature_dir(wt, a.slug) / "plan.md"
     if not plan.exists():
         raise Fail(f"{plan} is missing")
     text = plan.read_text()
     sha = planned_at(text)
-    if status_repos(a.slug):
-        # ponytail: planned-at is a workspace SHA and the plan's files live in product repos; add a per-repo
-        # planned-at when stale cross-repo plans actually bite.
-        print("drift: unchecked (workspace mode)")
-        return 0
     if not sha:
         print("drift: unchecked (no planned-at line in plan.md; written before drift checks)")
         return 0
@@ -908,67 +940,6 @@ def cmd_rules(a):
             paths += [r["path"] for r in repos()]       # each product repo's top-level rules too
     found = rule_files(root, paths, fallback=repo_root() if root != repo_root() else None)
     print("\n".join(found) if found else "none")
-
-
-def _ensure_product(slug, r):
-    """Create the product worktree for a feature: from origin/feature/<slug> if it exists (resume), else a new
-    branch off the repo's base, pushed right away."""
-    wt, pw, branch = worktree(slug), product_wt(slug, r["path"]), f"feature/{slug}"
-    if run(["git", "check-ignore", "-q", r["path"] + "/"], cwd=wt, check=False).returncode:   # "/": may not exist yet
-        raise Fail(f"{r['path']} isn't gitignored by the workspace (add /{r['path']}/ to .gitignore); "
-                   f"not creating its worktree inside the workspace worktree")
-    d = repo_dir(r["path"])
-    git("fetch", "-q", "origin", cwd=d)
-    local = git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=d, check=False)
-    remote = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=d, check=False)
-    if local:
-        git("worktree", "add", "-q", str(pw), branch, cwd=d)
-        if remote:
-            _catch_up(pw, branch)
-    elif remote:
-        git("worktree", "add", "-q", "--track", "-b", branch, str(pw), f"origin/{branch}", cwd=d)
-    else:
-        git("worktree", "add", "-q", "-b", branch, str(pw), f"origin/{repo_branch(r)}", cwd=d)
-    if not remote:
-        r_ = run(["git", "push", "-q", "-u", "origin", branch], cwd=pw, check=False)
-        if r_.returncode:
-            raise Fail(f"{r['path']}: pushing {branch} failed: {_last_line(r_)}")
-
-
-def cmd_repos(a):
-    rs = repos()
-    if not rs:
-        print("single-repo")
-        return 0
-    if a.slug:
-        if not worktree(a.slug).exists():
-            raise Fail(f"no worktree at {worktree(a.slug)}")
-        try:
-            idea = idea_info(a.slug)["repos"]
-        except Fail:
-            idea = []
-        plan = feature_dir(worktree(a.slug), a.slug) / "plan.md"
-        files = plan_files(plan.read_text()) if plan.exists() else []
-        want = {r["path"] for r in status_repos(a.slug)} | set(idea) | \
-            {r["path"] for r in rs if any(f == r["path"] or f.startswith(r["path"] + "/") for f in files)}
-        for name in sorted(want - {r["path"] for r in rs}):
-            print(f"{name}: not in ## Repos, skipped")
-        touched = [r for r in rs if r["path"] in want]
-        for r in touched:
-            exists = product_wt(a.slug, r["path"]).exists()
-            if a.ensure and not exists:
-                _ensure_product(a.slug, r)
-            print(f"{r['path']} {'exists' if exists else 'created' if a.ensure else 'missing'}")
-        if a.ensure:
-            sp = status_path(a.slug)
-            updates = {"repos": " ".join(r["path"] for r in touched) or "none"}
-            if "repo_prs" not in read_status(sp):
-                updates["repo_prs"] = "none"
-            write_status(sp, updates)
-        return 0
-    for r in rs:
-        d = repo_dir(r["path"])
-        print(f"{r['path']} {repo_branch(r)} {git('log', '-1', '--format=%h %s', cwd=d, check=False)}")
 
 
 def cmd_audit_path(a):
@@ -1015,21 +986,14 @@ def cmd_diff(a):
         lines, files = diffstat(a.slug, a.since)
         print(f"{lines} lines, {files} files")
         return
-    extra = ["--stat"] if a.stat else ["--unified=3"]
-    parts = [git("diff", *extra, *diff_args(a.slug, a.since), cwd=wt)]
-    for r in status_repos(a.slug):
-        d = repo_diff(a.slug, r, parse_since(a.since), extra)
-        parts.append(f"# {r['path']}\n{d}" if a.stat else d)
-    sys.stdout.write("\n".join(p for p in parts if p) + "\n")
-
-
-def cmd_heads(a):
-    """The value for last_reviewed_commit: the worktree's short HEAD, or in a workspace one <repo>:<sha> per repo."""
-    rs = status_repos(a.slug)
-    if not rs:
-        print(git("rev-parse", "--short", "HEAD", cwd=work_dir(a.slug)))
+    mode = ["--stat"] if a.stat else ["--unified=3"]
+    if ws_repos(a.slug):
+        for r, args in ws_diffs(a.slug, a.since):
+            if a.stat:
+                print(f"## {r['path']}")
+            sys.stdout.write(git("diff", *mode, *args, cwd=r["wt"]) + "\n")
         return
-    print(" ".join(f"{r['path']}:{git('rev-parse', '--short', 'HEAD', cwd=product_wt(a.slug, r['path']))}" for r in rs))
+    sys.stdout.write(git("diff", *mode, *diff_args(a.slug, a.since), cwd=wt) + "\n")
 
 
 def cmd_test(a):
@@ -1038,24 +1002,25 @@ def cmd_test(a):
         raise Fail(f"no worktree at {wt}")
     text = project_md()
     p = feature_dir(wt, a.slug) / "status.md"
-    # (label, cwd, block of commands): the workspace itself, then each product repo in a workspace
-    parts = [("", wt, section(text, "Build & test"))]
-    parts += [(f"{r['path']}:", product_wt(a.slug, r["path"]), r["block"]) for r in status_repos(a.slug)]
-    keys = [code_key(cwd) for _, cwd, _ in parts]
-    key = "+".join(keys) if all(keys) else None
-    cmds = "\n".join((block_command(b, "Build") or "") + "\n" + (block_command(b, "Test") or "") for _, _, b in parts)
+    rs = ws_repos(a.slug)
+    # (label, name, cmd, cwd); label is "" in single-repo mode so output stays unchanged
+    steps = [("", n, project_command(n, text), wt) for n in (("Build",) if a.build else ()) + ("Test",)]
+    if rs:
+        steps = [s for s in steps if s[2]] + [(f"{r['path']} ", n, block_command(n, r["body"]), r["wt"])
+                                             for r in rs for n in (("Build",) if a.build else ()) + ("Test",)]
+    keys = [code_key(c) for c in ([r["wt"] for r in rs] or [wt])]
+    key = None if None in keys else "+".join(keys) or None
+    cmds = "\n".join((project_command(n, text) or "") if not rs else (project_command(n, text) or "") + "".join(
+        "\n" + (block_command(n, r["body"]) or "") for r in rs) for n in ("Build", "Test"))
     if key:
         key += "+" + hashlib.sha1(cmds.encode()).hexdigest()[:6]
     cached = read_status(p).get("tests", "none")
     if key and not a.force and not a.build and cached.split(" ")[0] == key:
         print(f"tests (cached for {key}): {cached.split(' ', 1)[1]}")
         return 0 if cached.endswith("pass") else 1
-    steps = [(label + name, cwd, block_command(b, name)) for label, cwd, b in parts
-             for name in (("Build", "Test") if a.build else ("Test",))]
-    for name, cwd, cmd in steps:
+    for label, name, cmd, cwd in steps:
         if not cmd:
-            if ":" not in name:
-                print(f"{name}: none configured in project.md")
+            print(f"{label}{name}: none configured" + ("" if rs else " in project.md"))
             continue
         print(f"$ {cmd}")
         r = run(cmd, cwd=cwd, check=False, shell=True)
@@ -1063,8 +1028,9 @@ def cmd_test(a):
         if r.returncode:
             print("\n".join(out[-40:]))
             if key:
-                write_status(p, {"tests": f"{key} fail({name.lower()})"})
-            print(f"{name}: FAILED (exit {r.returncode})")
+                who = f"{label.strip()}:" if label else ""
+                write_status(p, {"tests": f"{key} fail({who}{name.lower()})"})
+            print(f"{label}{name}: FAILED (exit {r.returncode})")
             return 1
         print("\n".join(out[-3:]))
     if key:
@@ -1073,35 +1039,35 @@ def cmd_test(a):
     return 0
 
 
-def _sync_one(wt, d, label, keep):
-    """Merge origin/<d> into one worktree. label: "" for the workspace/single repo, "<repo>: " for a product."""
-    dirty = git("status", "--porcelain", "--", ".", f":(exclude){keep}", cwd=wt)
+def _sync_one(wt, base, excludes, label=""):
+    """Merge origin/<base> into wt's branch; True when something was merged."""
+    dirty = git("status", "--porcelain", "--", ".", *excludes, cwd=wt)
     if dirty:
-        raise Fail(f"{label}uncommitted changes in the worktree (not a merge conflict); commit or discard them "
-                   f"first:\n" + dirty)
-    git("fetch", "-q", "origin", d, cwd=wt)
-    if run(["git", "merge-base", "--is-ancestor", f"origin/{d}", "HEAD"], cwd=wt, check=False).returncode == 0:
-        print(f"{label}up to date with origin/{d}")
-        return
-    r = run(["git", "merge", "--no-edit", f"origin/{d}"], cwd=wt, check=False)
+        raise Fail(f"{label}uncommitted changes in the worktree (not a merge conflict); commit or discard them first:\n"
+                   + dirty)
+    git("fetch", "-q", "origin", base, cwd=wt)
+    if run(["git", "merge-base", "--is-ancestor", f"origin/{base}", "HEAD"], cwd=wt, check=False).returncode == 0:
+        return False
+    r = run(["git", "merge", "--no-edit", f"origin/{base}"], cwd=wt, check=False)
     if r.returncode:
         files = git("diff", "--name-only", "--diff-filter=U", cwd=wt, check=False)
         run(["git", "merge", "--abort"], cwd=wt, check=False)
         if not files:
-            raise Fail(f"{label}merging origin/{d} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
-        raise Fail(f"{label}merge conflict with origin/{d} in: {', '.join(files.split())}", code=2)
-    print(f"{label}merged origin/{d}")
+            raise Fail(f"{label}merging origin/{base} failed (not a conflict): {(r.stderr or r.stdout).strip()}")
+        raise Fail(f"{label}merge conflict with origin/{base} in: {', '.join(files.split())}", code=2)
+    return True
 
 
 def cmd_sync(a):
-    for r in status_repos(a.slug):
-        _sync_one(product_wt(a.slug, r["path"]), repo_branch(r), f"{r['path']}: ", ".agent-team")
-    _sync_one(worktree(a.slug), default_branch(), "", f".agent-team/features/{a.slug}")
+    d = default_branch()
+    todo = [(worktree(a.slug), d, [f":(exclude).agent-team/features/{a.slug}"], "")]
+    todo += [(r["wt"], repo_branch(r), [], f"{r['path']}: ") for r in ws_repos(a.slug)]
+    for wt, base, excludes, label in todo:      # all merge or the first conflict stops the sync
+        print(f"{label}{'merged' if _sync_one(wt, base, excludes, label) else 'up to date with'} origin/{base}")
     return 0
 
 
-def _push_one(wt, slug, label):
-    branch = f"feature/{slug}"
+def _push_branch(wt, slug, branch, label=""):
     r = run(["git", "push", "-u", "origin", branch], cwd=wt, check=False)
     if r.returncode == 0:
         print(f"{label}pushed {branch}")
@@ -1119,10 +1085,50 @@ def _push_one(wt, slug, label):
 
 
 def cmd_push(a):
-    for r in status_repos(a.slug):       # products first: the workspace branch carries the lease, so it goes last
-        _push_one(product_wt(a.slug, r["path"]), a.slug, f"{r['path']}: ")
-    _push_one(worktree(a.slug), a.slug, "")
+    branch = f"feature/{a.slug}"
+    for r in ws_repos(a.slug):      # products first, so the workspace branch never points at unpushed work
+        _push_branch(r["wt"], a.slug, branch, f"{r['path']}: ")
+    _push_branch(worktree(a.slug), a.slug, branch)
     return 0
+
+
+def cmd_commit(a):
+    rs = ws_repos(a.slug)
+    if not rs:
+        raise Fail("commit is for workspace features; use git commit")
+    by = {}
+    for p in a.paths:
+        p = os.path.relpath(Path(p).resolve(), worktree(a.slug).resolve()) if p.startswith("/") else os.path.normpath(p)
+        r = next((r for r in rs if p.startswith(r["path"] + "/")), None)
+        if not r:
+            raise Fail(f"{p} is not inside a product repo of {a.slug}")
+        by.setdefault(r["path"], []).append(p[len(r["path"]) + 1:])
+    touched = [r for r in rs if r["path"] in by]
+    staged = []
+    try:
+        for r in touched:       # stage everywhere first: a bad path fails before anything is committed
+            staged.append(r)
+            git("add", "--", *by[r["path"]], cwd=r["wt"])
+        for r in touched:
+            git("commit", "-q", "-m", a.message, cwd=r["wt"])
+            print(f"committed {r['path']} {git('rev-parse', '--short', 'HEAD', cwd=r['wt'])}")
+    except Fail as e:
+        for s in staged:        # don't leave earlier repos' paths staged for the next commit to sweep in
+            git("reset", "-q", "--", *by[s["path"]], cwd=s["wt"], check=False)
+        raise Fail(f"{r['path']}: {e}", code=e.code)
+
+
+def cmd_heads(a):
+    rs = ws_repos(a.slug)
+    print(" ".join(f"{r['path']}:{git('rev-parse', '--short', 'HEAD', cwd=r['wt'])}" for r in rs)
+          if rs else git("rev-parse", "--short", "HEAD", cwd=worktree(a.slug)))
+
+
+def parse_since(since):
+    """`a:x b:y` -> {"a": "x", "b": "y"}; a plain sha stays a string."""
+    if since and ":" in since:
+        return dict(t.split(":", 1) for t in since.split())
+    return since
 
 
 def cmd_idea(a):
@@ -1143,69 +1149,64 @@ def cmd_idea(a):
                 return 0
         raise Fail(f"unknown slug '{a.slug}': not in .agent-team/ideas.md")
     info = idea_info(a.slug)
-    print(f"status={info['status']} effort={info['effort'] or '?'}"
-          + (f" repos={','.join(info['repos'])}" if info["repos"] else ""))
+    print(f"status={info['status']} effort={info['effort'] or '?'}")
 
 
-def parse_repo_prs(v):
-    """status.md repo_prs "api#12 app#40" → [("api", "12"), ("app", "40")]."""
-    return [tuple(p.split("#", 1)) for p in (v or "").split() if "#" in p]
+def repo_prs(slug):
+    """status `repo_prs` ("app-backend#12 app-flutter#40") as {path: PR number}; {} for none."""
+    sp = status_path(slug)
+    return dict(t.rsplit("#", 1) for t in read_status(sp).get("repo_prs", "none").split() if "#" in t) if sp.exists() else {}
 
 
-def cmd_ci(a):
-    """Waits for checks to appear (GitHub can take a minute after a push) before deciding there is no CI.
-    In a workspace: every product PR (repo_prs) and the workspace PR; pass only if all pass or have no CI."""
-    st = read_status(status_path(a.slug))
-    pr = st.get("pr", "none")
-    prs = [(f"{p}#{n}: ", n, product_wt(a.slug, p)) for p, n in parse_repo_prs(st.get("repo_prs"))]
-    prs += [("", pr, work_dir(a.slug))] if pr not in ("", "none") else []
-    if not prs:
-        raise Fail("no pr in status.md")
-    if len(prs) == 1 and not prs[0][0]:
-        return _ci_one(a, pr, work_dir(a.slug), "")[0]
-    results = [_ci_one(a, n, wd, label, quiet=True) for label, n, wd in prs]
-    failed = [lines for code, verdict, lines in results if verdict == "fail"]
-    for lines in failed:
-        print(lines)
-    verdict = "fail" if failed else "pending" if any(v == "pending" for _, v, _ in results) else "pass"
-    print(f"ci: {verdict}")
-    return 1 if failed else 0
-
-
-def _ci_one(a, pr, wd, label, quiet=False):
-    """One PR's checks → (exit code, verdict, failing lines prefixed with label). Prints today's lines unless quiet."""
-    say = (lambda *_: None) if quiet else print
-    has_workflows = any((wd / ".github" / "workflows").glob("*.y*ml"))
-    grace = a.grace if a.grace is not None else (300 if has_workflows else 60)
+def _ci_one(pr, cwd, grace, watch, repo=None):
+    """One PR's checks → (pass|none|pending|fail, output). Waits for checks to appear (GitHub can take a
+    minute after a push) before deciding there is no CI."""
+    R = ["-R", repo] if repo else []
     deadline = time.monotonic() + grace
     while True:
-        r = run(["gh", "pr", "checks", pr], cwd=wd, check=False)
+        r = run(["gh", "pr", "checks", pr, *R], cwd=cwd, check=False)
         out = (r.stdout + r.stderr).strip()
         if "no checks reported" not in out.lower():
             break
         if time.monotonic() >= deadline:
-            say(f"ci: none (no checks appeared within {grace}s)")
-            return 0, "none", ""
+            return "none", f"(no checks appeared within {grace}s)"
         time.sleep(POLL_SECONDS)
-    if a.watch:
-        r = run(["gh", "pr", "checks", pr, "--watch", "--interval", "30"], cwd=wd, check=False)
+    if watch:
+        r = run(["gh", "pr", "checks", pr, *R, "--watch", "--interval", "30"], cwd=cwd, check=False)
         out = (r.stdout + r.stderr).strip()
     if r.returncode == 0:
-        say("ci: pass")
-        return 0, "pass", ""
+        return "pass", out
     if r.returncode == 8:
-        say("ci: pending")
-        return 0, "pending", ""
-    lines = "\n".join(l for l in out.splitlines() if re.search(r"\bfail", l, re.I)) or out[-2000:]
-    say(lines)
-    say("ci: fail")
-    return 1, "fail", "\n".join(label + l for l in lines.splitlines())
+        return "pending", out
+    return "fail", "\n".join(l for l in out.splitlines() if re.search(r"\bfail", l, re.I)) or out[-2000:]
+
+
+def cmd_ci(a):
+    pr = read_status(status_path(a.slug)).get("pr", "none")
+    rps = repo_prs(a.slug)
+    if pr in ("", "none") and not rps:
+        raise Fail("no pr in status.md")
+    # (label, pr, cwd, -R repo): product PRs first, then the workspace/only PR
+    units = [(f"{r['path']}#{rps[r['path']]}:", rps[r["path"]], r["wt"], gh_slug(r["src"]))
+             for r in ws_repos(a.slug) if r["path"] in rps]
+    if pr not in ("", "none"):
+        units.append((f"workspace#{pr}:" if units else None, pr, work_dir(a.slug), None))
+    states = []
+    for label, n, cwd, repo in units:
+        has_workflows = any((cwd / ".github" / "workflows").glob("*.y*ml"))
+        grace = a.grace if a.grace is not None else (300 if has_workflows else 60)
+        state, out = _ci_one(n, cwd, grace, a.watch, repo)
+        states.append(state)
+        if state == "fail":
+            print((label + "\n" if label else "") + out)
+    state = next((x for x in ("fail", "pending", "pass") if x in states), "none")
+    print(f"ci: {state}" + (f" {out}" if state == "none" and len(units) == 1 else ""))
+    return 1 if state == "fail" else 0
 
 
 def github_blob_base(wt, branch):
-    url = git("remote", "get-url", "origin", cwd=wt, check=False)
-    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
-    return f"https://github.com/{m.group(1)}/blob/{branch}/" if m else ""
+    slug = gh_slug(wt)
+    return f"https://github.com/{slug}/blob/{branch}/" if slug else ""
 
 
 def _section_lines(path, heading):
@@ -1222,11 +1223,28 @@ def _decisions_to_check(fd):
     return assumed + rulings
 
 
+def _merge_order(slug, this=None):
+    """Product PRs in workspace order, `owner/repo#n` joined with →; `this` (a path) is marked."""
+    rps = repo_prs(slug)
+    items = [f"{gh_slug(r['src']) or r['path']}#{rps.get(r['path'], '?')}" + (" (this PR)" if r["path"] == this else "")
+             for r in ws_repos(slug, ready=False) if r["path"] in rps or r["path"] == this]
+    return " → ".join(items)
+
+
 def cmd_pr_body(a):
     wt = work_dir(a.slug)
     fd = feature_dir(wt, a.slug)
     rel = f".agent-team/features/{a.slug}/"
     base = github_blob_base(wt, f"feature/{a.slug}")
+    if a.repo:
+        if a.repo not in [r["path"] for r in ws_repos(a.slug, ready=False)]:
+            raise Fail(f"{a.repo} is not a product repo of {a.slug}")
+        pr, root_slug = read_status(status_path(a.slug)).get("pr", "none"), gh_slug(repo_root())
+        ws_pr = f"[workspace PR](https://github.com/{root_slug}/pull/{pr})" if root_slug and pr.isdigit() else "workspace PR"
+        print((f"> **Stopped — needs your decision:** {a.stopped}\n\n" if a.stopped else "") +
+              f"## Summary\n{a.summary or '<!-- 3 lines -->'}\n\nPart of {a.slug}. Artifacts and reviews: {ws_pr}\n\n"
+              f"## Merge order\n{_merge_order(a.slug, a.repo)}")
+        return
     link = lambda name: f"[{name}]({base}{rel}{name})" if base else f"`{rel}{name}`"
     reports = sorted(p.name for p in fd.glob("review-*.md")) + sorted(p.name for p in fd.glob("qa-*.md"))
     parts = []
@@ -1234,15 +1252,7 @@ def cmd_pr_body(a):
         parts.append(f"> **Stopped — needs your decision:** {a.stopped}\n")
     parts.append("## Summary\n" + (a.summary or "<!-- 3 lines -->"))
     grill = ["grill.md"] if (fd / "grill.md").exists() else []
-    artifacts = "\n".join(f"- {link(n)}" for n in ["spec.md", *grill, "plan.md", *reports])
-    vals = read_status(fd / "status.md") if (fd / "status.md").exists() else {}
-    prs = dict(parse_repo_prs(vals.get("repo_prs")))
-    if a.repo:
-        return _product_pr_body(a, vals, prs, parts, artifacts, base)
-    parts.append("## Artifacts\n" + artifacts)
-    if prs:
-        parts.append("## Product PRs\nMerge these first, in this order; this PR (agent-team artifacts) last.\n"
-                     + "\n".join(f"- {p}#{n}" for p, n in prs.items()))
+    parts.append("## Artifacts\n" + "\n".join(f"- {link(n)}" for n in ["spec.md", *grill, "plan.md", *reports]))
     checks = _decisions_to_check(fd)
     if checks:
         parts.append("## Decisions to check\nCalls the agents made on your behalf — assumed grill answers and "
@@ -1251,23 +1261,8 @@ def cmd_pr_body(a):
     log = st.read_text().split("## Log", 1)[1].strip() if st.exists() and "## Log" in st.read_text() else ""
     log = "\n".join(l for l in log.splitlines() if not l.startswith("<!--"))
     parts.append("## Tier / model log\n```\n" + (log or "(empty)") + "\n```")
-    print("\n\n".join(parts))
-
-
-def _product_pr_body(a, st, prs, parts, artifacts, base):
-    """A product repo's PR body in a workspace: links back to the workspace PR and states merge order."""
-    order = [r["path"] for r in status_repos(a.slug)]
-    if a.repo not in order:
-        raise Fail(f"{a.repo} isn't one of this feature's repos ({' '.join(order) or 'none'})")
-    pr = st.get("pr", "none")
-    ws_url = re.sub(r"/blob/.*$", f"/pull/{pr}", base) if base and pr not in ("", "none") else ""
-    ws = f"[workspace PR #{pr}]({ws_url})" if ws_url else "the workspace PR"
-    others = [f"{p}#{n}" for p, n in prs.items() if p != a.repo]
-    parts.append(f"## Artifacts\nSpec, plan, reviews and QA live in {ws} (agent-team artifacts):\n{artifacts}")
-    parts.append(f"## Part of a cross-repo change\nPart of `{a.slug}`: {', '.join(others) or 'no other product PRs yet'}"
-                 f"{f', {ws}' if ws_url else ''}.\n\nMerge order: "
-                 + " → ".join(f"{p} (this PR)" if p == a.repo else f"{p}#{prs[p]}" if p in prs else p for p in order)
-                 + " → workspace PR (agent-team artifacts)")
+    if repo_prs(a.slug):
+        parts.append("## Product PRs\n" + _merge_order(a.slug) + "\n\nMerge these first, this one last.")
     print("\n\n".join(parts))
 
 
@@ -1275,13 +1270,6 @@ def _sum_usage(log):
     tokens = sum(int(x) for x in re.findall(r"tokens=(\d+)", log))
     cost = sum(float(x) for x in re.findall(r"cost=\$?([\d.]+)", log))
     return tokens, cost
-
-
-def _pr_column(s):
-    prs = parse_repo_prs(s.get("repo_prs"))
-    if not prs:
-        return s.get("pr", "none")
-    return " ".join(f"{p}#{n}" for p, n in prs) + (f" ws#{s['pr']}" if s.get("pr", "none") != "none" else "")
 
 
 def cmd_summary(a):
@@ -1312,8 +1300,9 @@ def cmd_summary(a):
         s = read_status_text(text)
         tokens, cost = _sum_usage(text.split("## Log", 1)[-1])
         note = s.get("stop_reason", "none")
+        pr = s.get("pr", "none") + ("" if s.get("repo_prs", "none") == "none" else f" + {s['repo_prs']}")
         rows.append(f"| {slug} | {s.get('stage', '?')} | {s.get('review_round', '0')} | {s.get('qa_round', '0')} | "
-                    f"{_pr_column(s)} | {tokens or '-'} | {f'${cost:.2f}' if cost else '-'} | "
+                    f"{pr} | {tokens or '-'} | {f'${cost:.2f}' if cost else '-'} | "
                     f"{'' if note == 'none' else note} |")
     if not rows:
         print("no features yet")
@@ -1322,86 +1311,77 @@ def cmd_summary(a):
     print("\n".join(rows))
 
 
-def merged_pr_head(pr, cwd):
+def merged_pr_head(pr, cwd, repo=None):
     """Head commit of a merged PR, or None (not merged, unknown, or gh unavailable)."""
     if pr in ("", "none", None):
         return None
-    r = run(["gh", "pr", "view", pr, "--json", "state,headRefOid", "-q", '.state + " " + .headRefOid'],
-            cwd=cwd, check=False)
+    r = run(["gh", "pr", "view", pr, *(["-R", repo] if repo else []), "--json", "state,headRefOid", "-q",
+             '.state + " " + .headRefOid'], cwd=cwd, check=False)
     state, _, oid = r.stdout.strip().partition(" ")
     return oid if r.returncode == 0 and state == "MERGED" and oid else None
 
 
-def _cleanup_one(root, wt, branch, pr, remote, label=""):
-    """Checks and actions for removing one repo's feature worktree and branches. root: the repo whose .git owns
-    the worktree. Returns (problems, act)."""
-    git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
-    pr_head = merged_pr_head(pr, root)
+def _cleanup_problems(root, wt, branch, pr_head, remote, base=None):
+    """What removing wt and branch (of the repo at root) would lose; base = the branch it merges into."""
     problems = []
     if wt.exists() and git("status", "--porcelain", cwd=wt):
-        problems.append(f"{label}uncommitted changes in {wt} — commit or discard them")
+        problems.append(f"uncommitted changes in {wt} — commit or discard them")
     tip = git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=root, check=False)
     if tip and tip != pr_head and not git("branch", "-r", "--contains", tip, cwd=root, check=False):
         n = git("rev-list", "--count", tip, "--not", "--remotes", cwd=root, check=False)
-        problems.append(f"{label}{n} commit(s) on {branch} are not on the remote and not in a merged PR — push them")
+        problems.append(f"{n} commit(s) on {branch} are not on the remote and not in a merged PR — push them")
     remote_tip = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False)
     if remote and remote_tip:
         try:
-            in_default = _is_ancestor(remote_tip, f"origin/{default_branch(root)}", root)
+            in_default = _is_ancestor(remote_tip, f"origin/{base or default_branch(root)}", root)
         except Fail:
             in_default = False
         if remote_tip != pr_head and not in_default:
-            problems.append(f"{label}origin/{branch} is not merged (no merged PR with that head, and not in the "
+            problems.append(f"origin/{branch} is not merged (no merged PR with that head, and not in the "
                             f"default branch) — merge its PR first, or run without --remote")
+    return problems
 
-    def act():
-        if wt.exists():
-            git("worktree", "remove", "--force", str(wt), cwd=root)
-            print(f"{label}removed worktree {wt}")
-        if tip:
-            git("branch", "-D", branch, cwd=root)
-            print(f"{label}deleted local {branch}")
-        if remote and remote_tip:
-            git("push", "origin", "--delete", branch, cwd=root)
-            print(f"{label}deleted origin/{branch}")
-    return problems, act
+
+def _cleanup_one(root, wt, branch, pr_head, remote, force, base=None):
+    """Check (unless force), then remove wt and the local (and with remote, origin's) branch of the repo at root."""
+    problems = _cleanup_problems(root, wt, branch, pr_head, remote, base)
+    if problems and not force:
+        raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's really "
+                   "what you want.")
+    if wt.exists():
+        git("worktree", "remove", "--force", str(wt), cwd=root)
+        print(f"removed worktree {wt}")
+    if git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=root, check=False):
+        git("branch", "-D", branch, cwd=root)
+        print(f"deleted local {branch}")
+    if remote and git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False):
+        git("push", "origin", "--delete", branch, cwd=root)
+        print(f"deleted origin/{branch}")
 
 
 def cmd_cleanup(a):
-    """Remove a feature's worktree and branches — only when nothing would be lost (or --force). In a workspace,
-    every product repo's too (products first: their worktrees sit inside the workspace one)."""
+    """Remove a feature's worktrees and branches — only when nothing would be lost (or --force)."""
     root = repo_root()
     branch = f"feature/{a.slug}"
     sp = status_path(a.slug)
-    st = read_status(sp) if sp.exists() else {}
-    prs = dict(parse_repo_prs(st.get("repo_prs")))
-    listed = repos() if read_doc(".agent-team/project.md") is not None else []
-    # status repos, plus any listed product worktree that exists (ensure may have died before recording it)
-    recorded = {r["path"] for r in status_repos(a.slug)}
-    rs = [r for r in listed if r["path"] in recorded or product_wt(a.slug, r["path"]).exists()]
-    problems, jobs = [], []
-    for name in st.get("repos", "none").split():
-        if name != "none" and name not in {r["path"] for r in listed} and product_wt(a.slug, name).exists():
-            problems.append(f"{name}: product worktree {product_wt(a.slug, name)} is in status.md but not in "
-                            f"## Repos — clean it up in that repo by hand")
-    for r in rs:
-        try:
-            d = repo_dir(r["path"])
-        except Fail as e:
-            if not a.force:
-                problems.append(str(e))
-            else:
-                print(f"{r['path']}: skipped ({e})")
-            continue
-        jobs.append(_cleanup_one(d, product_wt(a.slug, r["path"]), branch, prs.get(r["path"], "none"),
-                                 a.remote, f"{r['path']}: "))
-    jobs.append(_cleanup_one(root, worktree(a.slug), branch, st.get("pr", "none"), a.remote))
-    problems += [p for ps, _ in jobs for p in ps]
-    if problems and not a.force:
-        raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's really "
-                   "what you want.")
-    for _, act in jobs:
-        act()
+    pr = read_status(sp).get("pr", "none") if sp.exists() else "none"
+    rps = repo_prs(a.slug)
+    # (label, repo root, worktree, merged-PR head): product repos first, the workspace last
+    units = []
+    for r in ws_repos(a.slug, ready=False):
+        git("fetch", "-q", "--prune", "origin", cwd=r["src"], check=False)
+        units.append((r["path"], r["src"], r["wt"], merged_pr_head(rps.get(r["path"]), r["src"], gh_slug(r["src"])),
+                      repo_branch(r)))
+    git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
+    units.append((None, root, worktree(a.slug), merged_pr_head(pr, root), None))
+    if not a.force:   # check every repo before removing anything
+        problems = [f"{label}: {p}" if label else p for label, src, wt, head, base in units
+                    for p in _cleanup_problems(src, wt, branch, head, a.remote, base)]
+        if problems:
+            raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's "
+                       "really what you want.")
+    for _, src, wt, head, base in units:
+        _cleanup_one(src, wt, branch, head, a.remote, a.force, base)
 
 
 # ---------- docs commits (never on the local default branch) ----------
@@ -1633,30 +1613,24 @@ def section_raw(text, heading):
 
 
 def nested_repos(root):
-    """Workspace detection: top-level folders that are their own git repo and that the workspace gitignores."""
-    out = []
-    for d in sorted(p for p in Path(root).iterdir() if p.is_dir() and not p.name.startswith(".")):
+    """Sorted top-level dirs of root that are their own git repos and gitignored by root (a workspace)."""
+    def own_repo(d):
         top = git("rev-parse", "--show-toplevel", cwd=d, check=False)
-        if top and Path(top).resolve() == d.resolve() and \
-                run(["git", "check-ignore", "-q", d.name], cwd=root, check=False).returncode == 0:
-            out.append(d.name)
-    return out
+        return bool(top) and Path(top).resolve() == d.resolve()
+    return sorted(d.name for d in root.iterdir() if d.is_dir() and own_repo(d)
+                  and run(["git", "check-ignore", "-q", d.name + "/"], cwd=root, check=False).returncode == 0)
 
 
-def workspace_sections(paths):
-    """## Repos and ## Cross-repo rules drafts for upgrade; commands stay `none` until filled from each repo."""
-    blocks = "".join(f"### {p}\n- Role: unknown — owner to fill\n- Install: `none`\n- Build: `none`\n- Test: `none`\n"
-                     for p in paths)
-    return (f"## Repos\n<!-- One block per product repo; fill commands from its manifests/CI. -->\n{blocks}\n"
-            f"## Cross-repo rules\n- Order: {', '.join(paths)}   <!-- merge/ship order; first = earliest -->\n"
-            f"unknown — owner to fill\n")
+def draft_repos_sections(paths):
+    return ("## Repos\n" + "".join(f"### {p}\n- Role: unknown — owner to fill\n- Test: `none`\n" for p in paths)
+            + "\n## Cross-repo rules\n- Order: " + ", ".join(paths) + "\n- unknown — owner to fill\n")
 
 
 def merged_allow(existing, project_text):
-    """Template allow-list entries (with the project's and each product repo's commands) missing from existing."""
+    """Template allow-list entries (with the project's commands filled in) missing from existing."""
     tpl = json.loads((INIT_REFS / "claude-settings.json").read_text())["permissions"]["allow"]
     cmds = [project_command(n, project_text) for n in ("Install", "Build", "Test")]
-    cmds += [block_command(r["block"], n) for r in repos(project_text) for n in ("Install", "Build", "Test")]
+    cmds += [block_command(n, r["body"]) for r in repos(project_text) for n in ("Install", "Build", "Test")]
     entries = []
     for e in tpl:
         entries += [f"Bash({c}:*)" for c in cmds if c] if e == "{{TEST_COMMANDS}}" else [e]
@@ -1687,9 +1661,11 @@ def cmd_upgrade(a):
     changed = []
     text, added = add_missing_sections(proj.read_text(), (INIT_REFS / "project-template.md").read_text(),
                                        owner_line(root))
-    nested = nested_repos(root) if not re.search(r"^##\s+Repos\s*$", text, re.M | re.I) else []
-    if nested:
-        text = text.rstrip("\n") + "\n\n" + workspace_sections(nested)
+    nested = nested_repos(root)
+    if nested and not repos(text):
+        m = re.search(r"^##\s+Model overrides\s*$", text, re.M | re.I)
+        block = draft_repos_sections(nested)
+        text = text[:m.start()] + block + "\n" + text[m.start():] if m else text.rstrip("\n") + "\n\n" + block
         added += ["Repos", "Cross-repo rules"]
     if added:
         proj.write_text(text)
@@ -1724,6 +1700,10 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("default-branch", help="print the default branch")
     s.set_defaults(fn=cmd_default_branch)
+    s = sub.add_parser("repos", help="list the nested product repos from project.md ## Repos")
+    s.add_argument("slug", nargs="?"); s.add_argument("--log", action="store_true")
+    s.add_argument("--ensure", action="store_true", help="nest a worktree per touched repo under the feature's worktree")
+    s.set_defaults(fn=cmd_repos)
     s = sub.add_parser("init-status", help="write a fresh status.md in the feature's worktree")
     s.add_argument("slug"); s.set_defaults(fn=cmd_init_status)
     s = sub.add_parser("status", help="print status, one key, or set keys")
@@ -1747,9 +1727,6 @@ def build_parser():
     s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
     s = sub.add_parser("rules", help="the repo's AGENTS.md/CLAUDE.md files governing a feature's or some paths' code")
     s.add_argument("targets", nargs="*", metavar="SLUG|PATH"); s.set_defaults(fn=cmd_rules)
-    s = sub.add_parser("repos", help="workspace mode: the product repos in project.md ## Repos; with a slug, the "
-                                   "feature's product worktrees (--ensure creates missing ones)")
-    s.add_argument("slug", nargs="?"); s.add_argument("--ensure", action="store_true"); s.set_defaults(fn=cmd_repos)
     s = sub.add_parser("audit-path", help="next free audit report path, and earlier audit reports")
     s.add_argument("--date", help="YYYY-MM-DD (default: today, UTC)"); s.set_defaults(fn=cmd_audit_path)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
@@ -1758,13 +1735,16 @@ def build_parser():
     s.add_argument("slug"); s.add_argument("--since", metavar="SHA")
     s.add_argument("--stat", action="store_true"); s.add_argument("--shortstat", action="store_true")
     s.set_defaults(fn=cmd_diff)
-    s = sub.add_parser("heads", help="the value for last_reviewed_commit (per repo in a workspace)")
-    s.add_argument("slug"); s.set_defaults(fn=cmd_heads)
     s = sub.add_parser("test", help="run project tests in the worktree; cached per code commit")
     s.add_argument("slug"); s.add_argument("--build", action="store_true", help="run Build first")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_test)
     s = sub.add_parser("sync", help="merge the default branch into the feature branch")
     s.add_argument("slug"); s.set_defaults(fn=cmd_sync)
+    s = sub.add_parser("commit", help="workspace features: commit paths into their product repos")
+    s.add_argument("slug"); s.add_argument("-m", "--message", required=True); s.add_argument("paths", nargs="+")
+    s.set_defaults(fn=cmd_commit)
+    s = sub.add_parser("heads", help="short HEAD per repo (workspace) or of the worktree")
+    s.add_argument("slug"); s.set_defaults(fn=cmd_heads)
     s = sub.add_parser("push", help="push the feature branch; explains a rejection")
     s.add_argument("slug"); s.set_defaults(fn=cmd_push)
     s = sub.add_parser("idea", help="print or set an idea's status")
@@ -1778,7 +1758,7 @@ def build_parser():
     s.set_defaults(fn=cmd_ci)
     s = sub.add_parser("pr-body", help="print the PR body")
     s.add_argument("slug"); s.add_argument("--summary"); s.add_argument("--stopped", metavar="REASON")
-    s.add_argument("--repo", metavar="PATH", help="workspace mode: the body for that product repo's PR")
+    s.add_argument("--repo", metavar="PATH", help="body for this product repo's PR (workspace mode)")
     s.set_defaults(fn=cmd_pr_body)
     s = sub.add_parser("summary", help="all features: stage, rounds, tokens, cost")
     s.set_defaults(fn=cmd_summary)

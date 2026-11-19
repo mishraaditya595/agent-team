@@ -1,4 +1,4 @@
-<!-- Append entries under a dated heading. Keep each entry to 7 lines (8 with **Repos:**).
+<!-- Append entries under a dated heading. Keep each entry to 7 lines.
      Status: proposed | shipped | rejected — set with `agent-team idea <slug> --set <status>`.
      An idea is in progress while a feature/<slug> branch exists. -->
 
@@ -8,7 +8,7 @@
 - **Status:** proposed
 - **User & problem:** <who, and what's hard for them today>
 - **Idea:** <what we'd build, one or two lines>
-- **Repos:** <workspace only: the product repos it touches, from project.md ## Repos; omit this line otherwise>
+- **Repos:** <workspace only: repo paths it touches, in ship order>
 - **Value:** H|M|L · **Effort:** S|M|L · **Risk:** <one line>
 - **Evidence:** <file:line, TODO cluster, half-built feature, promise with no code, one-way pair — or `owner request` for an owner's idea>
 - **Why now:** <one line>

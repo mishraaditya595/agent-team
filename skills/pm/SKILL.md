@@ -16,7 +16,7 @@ You work in one of four modes. The workflow tells you which.
 ## Reads
 
 - `.agent-team/project.md` — always, first. Then, in ideation and spec mode, the docs it lists under `## Intent docs`: a decision recorded there is settled — never propose against it.
-- **Ideation mode:** the product as it is today. Skim cheaply: README, the main screens/routes/endpoints, recent `git log --oneline -30` (in a workspace — `project.md` has `## Repos` — do this per product repo: `git -C <path> log --oneline -30`, its README and main routes/screens, plus `## Cross-repo rules`; the workspace's own log isn't the product), existing `.agent-team/ideas.md` (never re-propose a slug or idea already there, whatever its status — `rejected` ideas stay rejected), `.agent-team/lessons.md` if present, and any feedback notes the owner points you to. Don't read implementation details you don't need.
+- **Ideation mode:** the product as it is today. Skim cheaply: README, the main screens/routes/endpoints, recent `git log --oneline -30`, existing `.agent-team/ideas.md` (never re-propose a slug or idea already there, whatever its status — `rejected` ideas stay rejected), `.agent-team/lessons.md` if present, and any feedback notes the owner points you to. Don't read implementation details you don't need. In a workspace (`project.md` has `## Repos`): run `agent-team repos --log` for each repo's recent history (not `git log` or any git inside nested repos), and skim each repo's README and main routes/screens; read `## Cross-repo rules`.
 - **Intake mode:** the owner's idea as given, `ideas.md` (to avoid duplicates and slug clashes), and only the parts of the product the idea touches — enough to rate it.
 - **Spec mode:** the chosen idea's entry (the workflow passes it; `agent-team idea <slug> --show` prints it), plus only the parts of the product that the idea touches, plus the repo's rules files (`agent-team rules` lists them) — treat them like `## Intent docs`: never spec against one.
 - **Answer mode:** `.agent-team/features/<slug>/grill.md` (the latest round), your `spec.md`, the idea's entry, and only the parts of the product a question touches.
@@ -25,6 +25,7 @@ You work in one of four modes. The workflow tells you which.
 
 - **Ideation mode:** appends up to **5** ideas to `.agent-team/ideas.md` using `references/ideas-template.md`.
 - **Intake mode:** appends exactly **one** entry to `.agent-team/ideas.md` using `references/ideas-template.md`, under a heading `## <date> — mode: owner`.
+- In a workspace every idea (ideation and intake) gets `- **Repos:** <paths it touches>`.
 - **Spec mode:** `.agent-team/features/<slug>/spec.md` using `references/spec-template.md`.
 - **Answer mode:** fills every `**Answer:**` line of the latest round in `grill.md`. Nothing else.
 
@@ -35,7 +36,7 @@ You work in one of four modes. The workflow tells you which.
 2. Find the user problems first, then the ideas. Each idea must name the user, the problem, and why it matters now.
 3. **Ground every idea in evidence** from this repo and fill its `**Evidence:**` line: a `file:line`, a TODO/FIXME cluster, a half-built or flagged-off feature, a README or intent-doc promise with no code behind it, a one-way pair (export without import, create without delete), or owner feedback. An idea that would fit any product in the category ("add dark mode", "add AI") has no evidence — drop it.
 4. Rate each: value (H/M/L), effort (S/M/L), risk (one line). Lead with the best value-for-effort. Rate effort honestly: an `S` idea gets its spec written on a cheaper tier.
-5. Give each a new kebab-case slug and `**Status:** proposed`. In a workspace, fill `**Repos:**` with every product repo the idea touches (intake mode too).
+5. Give each a new kebab-case slug and `**Status:** proposed`.
 6. Fewer, sharper ideas beat a long list. Five is the maximum, not a target.
 
 **Intake** (the owner brings an idea)

@@ -99,9 +99,16 @@ Workspace mode ⇔ `project.md` has a `## Repos` section with at least one `### 
 - Nothing is written into product repos. `.agent-team/` and `.claude/settings.json` are committed to the workspace (that is where Claude is launched and where memory lives). Settings get `Bash(<cmd>:*)` entries for every repo's commands.
 - `agent-team upgrade` adds `## Repos` / `## Cross-repo rules` only when nested repos are detected. This needs a special case: `add_missing_sections()` adds every template heading a `project.md` lacks, so `upgrade` must skip these two explicitly unless nested repos are detected. Don't rely on keeping them as a commented example in `project-template.md`: `_headings()` and `section_raw()` read the raw template without stripping `<!-- -->`, so a commented `## Repos` would still be added (with a stray `-->`) and switch the project into workspace mode.
 
+### Permissions: git in nested repos goes through the helper
+
+The allow-list `team-init` writes matches command prefixes (`Bash(git log:*)`, `Bash(git commit:*)`). `git -C <repo> …` matches none of them, so hands-off runs would prompt; `Bash(git -C:*)` would also allow `git -C x push --force` and is not allowed. So every git operation in a product repo goes through `agent-team` (already allowed as `Bash(agent-team:*)`):
+
+- `agent-team repos --log` — per listed repo: path, default branch, `git log --oneline -30`.
+- `agent-team commit <slug> -m "<msg>" <paths…>` — groups paths by repo prefix and commits each group in that repo's product worktree (one commit per repo, same message); a path outside every product repo is refused. Workspace mode only; single-repo developers keep `git add` / `git commit`.
+
 ### PM ideation
 
-- `pm` SKILL.md ideation mode: in workspace mode, evidence is `git -C <path> log --oneline -30` per listed repo (not the workspace log), plus each repo's README and main routes/screens.
+- `pm` SKILL.md ideation mode: in workspace mode, evidence is `agent-team repos --log` (each listed repo's recent history, not the workspace log), plus each repo's README and main routes/screens.
 - `ideas-template.md`: optional `**Repos:** app-backend, app-flutter` line per idea; required in workspace mode, omitted in single-repo mode. Intake mode fills it too.
 - `idea_info()` exposes `repos` (list, empty if absent).
 
@@ -150,7 +157,7 @@ All loop over `status.md` `repos` (in order); with no `repos` key they behave ex
 
 - Step 1: create the workspace worktree as today, then product worktrees (above).
 - Plan stage: Tech Lead reads `## Repos` and `## Cross-repo rules`; every task's `files:` live in exactly one product repo (a task with workspace-level paths is a `## Spec problems` entry, which stops the run); tasks for an earlier repo in `Order:` come first. Then `agent-team repos <slug> --ensure`.
-- Developer: commits inside the product worktree for the task's repo (each product worktree is its own git checkout). `status.md` commits stay in the workspace worktree.
+- Developer: commits with `agent-team commit <slug> -m … <paths>` (see Permissions), which lands each path in its product worktree. `status.md` commits stay in the workspace worktree.
 - Reviewer: reads `## Cross-repo rules` and checks them as findings (e.g. non-additive API change breaking shipped app builds → Critical).
 - pr stage: one `gh pr create -R <owner/repo>` per touched repo with a non-empty diff, in `Order:`; then the workspace PR (artifacts). Set `repo_prs` and `pr`.
 - pr-open message: lists PRs in merge order; workspace PR last.

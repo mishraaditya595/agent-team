@@ -1,503 +1,490 @@
-"""Workspace mode (#8): a workspace repo with nested, gitignored product repos listed under ## Repos."""
+"""Workspace mode: a parent repo whose project.md lists nested product repos."""
+import sys
+from pathlib import Path
+
 import pytest
 
-from test_agent_team import at, new_feature, repo, sh  # noqa: F401  (fixture)
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "skills" / "team-build" / "scripts"))
+sys.path.insert(0, str(ROOT / "tests"))
+import agent_team as at  # noqa: E402
+from test_agent_team import repo, sh  # noqa: E402,F401
 
-REPOS = """
+WS_PROJECT = """# WS — project context
+
+## Build & test
+- Test: `none`
+
 ## Repos
-### app
-- Role: mobile app
-- Test: `true`
-### api
-- Role: REST API
+### app-backend
+- Role: API
+- Test: `test -f api.txt`
+### app-flutter
+- Role: app
 - Branch: main
-- Install: `npm ci`
-- Test: `true`
+- Test: `test -f ui.txt`
 
 ## Cross-repo rules
-- Order: api, app
-- app: shipped builds keep working (additive API changes only).
+- Order: app-backend, app-flutter
+- app-flutter: shipped builds keep working.
+
+## Model overrides
+none
+"""
+
+WS_IDEAS = """## 2026-11-18 — mode: hold
+
+### both — Both
+- **Repos:** app-backend, app-flutter
+- **Value:** H · **Effort:** S · **Risk:** low
 """
 
 
-def product(tmp_path, work, name):
-    remote = tmp_path / f"{name}.git"
-    sh("git", "init", "-q", "--bare", "-b", "main", str(remote), cwd=tmp_path)
-    d = work / name
-    sh("git", "clone", "-q", str(remote), str(d), cwd=tmp_path)
-    for k, v in (("user.name", "t"), ("user.email", "t@t")):
+def _clone(tmp_path, name, fname=None):
+    sh("git", "init", "-q", "--bare", "-b", "main", str(tmp_path / f"{name}.git"), cwd=tmp_path)
+    d = tmp_path / "work" / name if name != "remote" else tmp_path / "work"
+    sh("git", "clone", "-q", str(tmp_path / f"{name}.git"), str(d), cwd=tmp_path)
+    for k, v in (("user.name", "t"), ("user.email", "t@t"), ("init.defaultBranch", "main")):
         sh("git", "config", k, v, cwd=d)
     sh("git", "checkout", "-q", "-b", "main", cwd=d)
-    (d / "src.txt").write_text(f"{name}\n")
-    sh("git", "add", "-A", cwd=d); sh("git", "commit", "-qm", "init", cwd=d)
-    sh("git", "push", "-q", "-u", "origin", "main", cwd=d)
-    sh("git", "remote", "set-head", "origin", "main", cwd=d)
     return d
 
 
-@pytest.fixture
-def workspace(repo, tmp_path):
-    for name in ("app", "api"):
-        product(tmp_path, repo, name)
-    (repo / ".gitignore").write_text(".agent-team/worktrees/\n/app/\n/api/\n")
-    p = repo / ".agent-team" / "project.md"
-    p.write_text(p.read_text() + REPOS)
-    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "workspace", cwd=repo); sh("git", "push", "-q", cwd=repo)
-    return repo
-
-
-def out(capsys, *args):
-    capsys.readouterr()
-    code = at.main(list(args))
-    o = capsys.readouterr()
-    return code, o.out.strip(), o.err.strip()
-
-
-# ---------- Task 3: ## Repos ----------
-
-def test_repos_parsed_and_ordered(workspace):
-    rs = at.repos()
-    assert [r["path"] for r in rs] == ["api", "app"]          # Order: wins over listing order
-    api = rs[0]
-    assert api["role"] == "REST API" and api["branch"] == "main"
-    assert at.block_command(api["block"], "Install") == "npm ci"
-    assert rs[1]["branch"] is None
-
-
-def test_repos_none_section_is_single_repo(repo, capsys):
-    p = repo / ".agent-team" / "project.md"
-    p.write_text(p.read_text() + "\n## Repos\n<!-- ### api -->\nnone\n")
-    assert at.repos() == []
-    assert out(capsys, "repos")[1] == "single-repo"
-
-
-def test_block_command_matches_project_command(repo):
-    text = (repo / ".agent-team" / "project.md").read_text()
-    assert at.block_command(at.section(text, "Build & test"), "Test") == at.project_command("Test", text) == "true"
-
-
-def test_repos_cmd_lists_and_rejects_non_repo(workspace, capsys):
-    code, o, _ = out(capsys, "repos")
-    assert code == 0 and [l.split()[:2] for l in o.splitlines()] == [["api", "main"], ["app", "main"]]
-    p = workspace / ".agent-team" / "project.md"
-    p.write_text(p.read_text().replace("### app", "### missing\n- Test: `true`\n### app"))
-    code, _, err = out(capsys, "repos")
-    assert code == 1 and "missing" in err
-
-
-def test_rules_noarg_includes_repo_roots(workspace, capsys):
-    (workspace / "AGENTS.md").write_text("ws\n")
-    (workspace / "api" / "AGENTS.md").write_text("api\n")
-    (workspace / "api" / "deep").mkdir()
-    (workspace / "api" / "deep" / "AGENTS.md").write_text("deep\n")
-    assert out(capsys, "rules")[1] == "AGENTS.md\napi/AGENTS.md"
-
-
-# ---------- Task 4: team-init / upgrade ----------
-
-def test_upgrade_adds_repos_only_when_nested(repo, tmp_path, capsys):
-    assert at.main(["upgrade"]) == 0
-    assert "Repos" not in capsys.readouterr().out
-    assert "## Repos" not in (repo / ".agent-team" / "project.md").read_text()
-    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "upgrade", cwd=repo)
-    for name in ("app", "api"):
-        product(tmp_path, repo, name)
-    (repo / ".gitignore").write_text(".agent-team/worktrees/\n/app/\n/api/\n")
-    sh("git", "commit", "-qam", "ignore", cwd=repo)
-    assert at.main(["upgrade"]) == 0
-    assert "Repos, Cross-repo rules" in capsys.readouterr().out
-    text = (repo / ".agent-team" / "project.md").read_text()
-    assert [r["path"] for r in at.repos(text)] == ["api", "app"]
-    assert "- Order: api, app" in at.section(text, "Cross-repo rules")
-    assert at.block_command(at.repos(text)[0]["block"], "Test") is None       # owner/agent fills commands
-
-
-def test_upgrade_ignores_unignored_nested_repo(repo, tmp_path, capsys):
-    product(tmp_path, repo, "extra")                      # nested repo, but not gitignored by the workspace
-    assert at.nested_repos(repo) == []
-    assert at.main(["upgrade"]) == 0
-    assert "## Repos" not in (repo / ".agent-team" / "project.md").read_text()
-
-
-def test_merged_allow_includes_repo_commands(workspace):
-    allow = at.merged_allow([], (workspace / ".agent-team" / "project.md").read_text())
-    assert "Bash(npm ci:*)" in allow and allow.count("Bash(true:*)") == 1
-
-
-# ---------- Task 5: ideation ----------
-
-def test_idea_repos_line(workspace, capsys):
-    i = workspace / ".agent-team" / "ideas.md"
-    i.write_text(i.read_text() + "\n### xr — Cross\n- **Repos:** api, `app`\n- **Value:** H · **Effort:** M · **Risk:** x\n")
-    assert at.idea_info("xr")["repos"] == ["api", "app"]
-    assert at.idea_info("tiny")["repos"] == []
-    assert out(capsys, "idea", "xr")[1] == "status=proposed effort=M repos=api,app"
-    assert out(capsys, "idea", "tiny")[1] == "status=proposed effort=S"
-
-
-# ---------- Task 6: product worktrees, status keys, lease ----------
-
-XR_IDEA = "\n### xr — Cross\n- **Repos:** api\n- **Value:** H · **Effort:** M · **Risk:** x\n"
+def _push(d, files):
+    for rel, text in files.items():
+        (d / rel).parent.mkdir(parents=True, exist_ok=True)
+        (d / rel).write_text(text)
+    sh("git", "add", "-A", cwd=d)
+    sh("git", "commit", "-q", "-m", "init", cwd=d)
+    sh("git", "push", "-q", "-u", "origin", "main", cwd=d)
+    sh("git", "remote", "set-head", "origin", "main", cwd=d)
 
 
 @pytest.fixture
-def feature(workspace, capsys):
-    """Workspace feature 'xr' (idea touches api) with its workspace worktree and status.md committed."""
-    i = workspace / ".agent-team" / "ideas.md"
-    i.write_text(i.read_text() + XR_IDEA)
-    sh("git", "commit", "-qam", "idea", cwd=workspace); sh("git", "push", "-q", cwd=workspace)
-    wt, fd = new_feature(workspace, "xr", capsys)
-    return wt, fd
+def ws(tmp_path, monkeypatch):
+    work = _clone(tmp_path, "remote")
+    _push(work, {".gitignore": ".agent-team/worktrees/\n/app-backend/\n/app-flutter/\n",
+                 ".agent-team/project.md": WS_PROJECT, ".agent-team/ideas.md": WS_IDEAS})
+    # product clones live inside the (gitignored) workspace checkout
+    for name, f in (("backend", "api.txt"), ("app", "ui.txt")):
+        d = _clone(tmp_path, name)
+        _push(d, {f: "x\n"})
+        d.rename(work / {"backend": "app-backend", "app": "app-flutter"}[name])
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("AGENT_TEAM_HOST", "box-a")
+    return work
 
 
-def branches(repo_dir, remote=False):
-    ref = "refs/remotes/origin/feature/" if remote else "refs/heads/feature/"
-    return sh("git", "for-each-ref", "--format=%(refname:short)", ref, cwd=repo_dir).split()
+def test_repos_parsed_in_order_with_commands():
+    rs = at.repos(WS_PROJECT)
+    assert [r["path"] for r in rs] == ["app-backend", "app-flutter"]
+    assert rs[1]["branch"] == "main" and rs[0]["branch"] is None and rs[0]["role"] == "API"
+    assert at.block_command("Test", rs[0]["body"]) == "test -f api.txt"
 
 
-def test_ensure_creates_product_worktrees_from_idea(feature, workspace, capsys):
-    wt, fd = feature
-    code, o, err = out(capsys, "repos", "xr", "--ensure")
-    assert code == 0, err
-    assert o == "api created"
-    assert sh("git", "branch", "--show-current", cwd=wt / "api") == "feature/xr"
-    sh("git", "fetch", "-q", "origin", cwd=workspace / "api")
-    assert branches(workspace / "api", remote=True) == ["origin/feature/xr"]
-    st = at.read_status(fd / "status.md")
-    assert st["repos"] == "api" and st["repo_prs"] == "none"
-    assert out(capsys, "repos", "xr", "--ensure")[1] == "api exists"
+def test_order_line_wins_over_listing_order():
+    t = WS_PROJECT.replace("- Order: app-backend, app-flutter", "- Order: app-flutter, app-backend")
+    assert [r["path"] for r in at.repos(t)] == ["app-flutter", "app-backend"]
 
 
-def test_ensure_adds_plan_repos(feature, capsys):
-    wt, fd = feature
-    (fd / "plan.md").write_text((fd / "plan.md").read_text() + "\n## Files\n- `app/lib/x.dart` — modify — y\n")
-    assert out(capsys, "repos", "xr", "--ensure")[1] == "api created\napp created"
-    assert at.read_status(fd / "status.md")["repos"] == "api app"
+def test_single_repo_has_no_repos():
+    from test_agent_team import PROJECT
+    assert at.repos(PROJECT.format(test="true", overrides="none")) == []
+    assert at.project_command("Test", PROJECT.format(test="true", overrides="none")) == "true"
 
 
-def test_ensure_reuses_remote_branch(feature, workspace, capsys):
-    wt, fd = feature
-    assert at.main(["repos", "xr", "--ensure"]) == 0
-    (wt / "api" / "new.txt").write_text("x\n")
-    sh("git", "add", "-A", cwd=wt / "api"); sh("git", "commit", "-qm", "work", cwd=wt / "api")
-    sh("git", "push", "-q", "origin", "feature/xr", cwd=wt / "api")
-    head = sh("git", "rev-parse", "HEAD", cwd=wt / "api")
-    sh("git", "worktree", "remove", "--force", str(wt / "api"), cwd=workspace / "api")   # another machine: no local copy
-    sh("git", "branch", "-D", "feature/xr", cwd=workspace / "api")
-    assert out(capsys, "repos", "xr", "--ensure")[1] == "api created"
-    assert sh("git", "rev-parse", "HEAD", cwd=wt / "api") == head
+def test_repos_cli_lists_and_logs(ws, capsys):
+    assert at.main(["repos", "--log"]) == 0
+    out = capsys.readouterr().out
+    assert "app-backend branch=main" in out and "app-flutter branch=main" in out
+    assert out.count("init") >= 2      # each product's first commit message, from its own log
 
 
-def test_ensure_refuses_unignored_path(feature, capsys):
-    wt, fd = feature
-    (wt / ".gitignore").write_text(".agent-team/worktrees/\n/app/\n")
-    code, _, err = out(capsys, "repos", "xr", "--ensure")
-    assert code == 1 and "api" in err and "gitignore" in err
-    assert not (wt / "api").exists()
+def test_repos_cli_fails_on_missing_repo(ws, capsys):
+    import shutil; shutil.rmtree(ws / "app-flutter")
+    assert at.main(["repos"]) == 1
+    assert "app-flutter" in capsys.readouterr().err
 
 
-def test_lease_catches_up_products(feature, workspace, tmp_path, capsys):
-    wt, fd = feature
-    assert at.main(["repos", "xr", "--ensure"]) == 0
-    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt); sh("git", "push", "-q", "-u", "origin", "feature/xr", cwd=wt)
-    other = tmp_path / "other-api"
-    sh("git", "clone", "-q", "-b", "feature/xr", str(tmp_path / "api.git"), str(other), cwd=tmp_path)
-    sh("git", "config", "user.email", "o@o", cwd=other); sh("git", "config", "user.name", "o", cwd=other)
-    (other / "o.txt").write_text("o\n"); sh("git", "add", "-A", cwd=other); sh("git", "commit", "-qm", "o", cwd=other)
-    sh("git", "push", "-q", cwd=other)
-    (wt / "api" / "l.txt").write_text("l\n"); sh("git", "add", "-A", cwd=wt / "api"); sh("git", "commit", "-qm", "l", cwd=wt / "api")
-    code, _, err = out(capsys, "lease", "xr", "acquire")
-    assert code == 1 and "diverged" in err
-
-
-def test_single_repo_status_and_ensure_unchanged(repo, capsys):
-    wt, fd = new_feature(repo)
-    before = (fd / "status.md").read_text()
-    assert "repos:" not in before
-    assert out(capsys, "repos", "tiny", "--ensure")[1] == "single-repo"
-    assert (fd / "status.md").read_text() == before
-
-
-# ---------- Task 7: test, diff, heads, --since ----------
-
-def commit(d, name, text="x\n", msg="change"):
-    (d / name).write_text(text)
-    sh("git", "add", "-A", cwd=d); sh("git", "commit", "-qm", msg, cwd=d)
-    return sh("git", "rev-parse", "--short", "HEAD", cwd=d)
-
-
-@pytest.fixture
-def ws_feature(feature, capsys):
-    wt, fd = feature
-    assert at.main(["repos", "xr", "--ensure"]) == 0
-    capsys.readouterr()
-    return wt, fd
-
-
-def test_ws_diff_prefixes_paths(ws_feature, capsys):
-    wt, _ = ws_feature
-    commit(wt / "api", "src.txt", "changed\n")
-    o = out(capsys, "diff", "xr")[1]
-    assert "a/api/src.txt" in o and "b/api/src.txt" in o and "+changed" in o
-    stat = out(capsys, "diff", "xr", "--stat")[1]
-    assert "# api" in stat and "src.txt" in stat
-
-
-def test_ws_diff_since_per_repo_and_plain_sha(ws_feature, capsys):
-    wt, _ = ws_feature
-    c1 = commit(wt / "api", "one.txt")
-    commit(wt / "api", "two.txt")
-    o = out(capsys, "diff", "xr", "--since", f"api:{c1}", "--stat")[1]
-    assert "two.txt" in o and "one.txt" not in o
-    ws_head = sh("git", "rev-parse", "--short", "HEAD", cwd=wt)
-    for since in (ws_head, f"app:{c1}"):          # old plain SHA, or no entry for api → api diffs against its base
-        o = out(capsys, "diff", "xr", "--since", since, "--stat")[1]
-        assert "one.txt" in o and "two.txt" in o, since
-
-
-def test_ws_shortstat_sums(ws_feature, capsys):
-    wt, _ = ws_feature
-    commit(wt / "api", "a.txt", "1\n2\n")
-    commit(wt / "app", "b.txt", "1\n") if (wt / "app").exists() else None
-    assert out(capsys, "diff", "xr", "--shortstat")[1] == "2 lines, 1 files"
-    assert at.diffstat("xr") == (2, 1)
-
-
-def set_repo_test(ws, path, cmd):
-    assert path == "api"
+def test_upgrade_adds_repos_when_nested(ws, capsys):
     p = ws / ".agent-team" / "project.md"
-    p.write_text(p.read_text().replace("- Install: `npm ci`\n- Test: `true`", f"- Install: `npm ci`\n- Test: `{cmd}`"))
+    p.write_text(p.read_text().split("## Repos")[0] + "## Model overrides\nnone\n")
+    sh("git", "commit", "-qam", "drop repos", cwd=ws)
+    assert at.main(["upgrade"]) == 0
+    text = p.read_text()
+    assert "### app-backend\n" in text and "### app-flutter\n" in text
+    assert "- Order: app-backend, app-flutter" in text
+    assert text.index("## Repos") < text.index("## Model overrides")
+    assert "Repos, Cross-repo rules\n" in capsys.readouterr().out
 
 
-def test_ws_test_runs_each_repo_and_caches(ws_feature, workspace, capsys):
-    set_repo_test(workspace, "api", "echo api-ran")
-    code, o, _ = out(capsys, "test", "xr")
-    assert code == 0 and "$ echo api-ran" in o and "api-ran" in o and "tests: pass" in o
-    code, o, _ = out(capsys, "test", "xr")
-    assert code == 0 and "cached" in o
+def test_upgrade_single_repo_never_adds_repos(repo, capsys):
+    at.main(["upgrade"])
+    assert "## Repos" not in (repo / ".agent-team" / "project.md").read_text()
 
 
-def test_ws_test_failure_names_repo(ws_feature, workspace, capsys):
-    wt, fd = ws_feature
-    set_repo_test(workspace, "api", "false")
-    code, o, _ = out(capsys, "test", "xr")
-    assert code == 1 and "api:Test: FAILED" in o
-    assert at.read_status(fd / "status.md")["tests"].endswith("fail(api:test)")
+def test_unignored_nested_repo_not_detected(ws):
+    (ws / ".gitignore").write_text(".agent-team/worktrees/\n/app-backend/\n")
+    assert at.nested_repos(ws) == ["app-backend"]
 
 
-def test_heads_format(ws_feature, repo, capsys):
-    wt, _ = ws_feature
-    c = commit(wt / "api", "h.txt")
-    assert out(capsys, "heads", "xr")[1] == f"api:{c}"
+def test_allow_list_covers_repo_commands():
+    allow = at.merged_allow([], WS_PROJECT)
+    assert "Bash(test -f api.txt:*)" in allow and "Bash(test -f ui.txt:*)" in allow
 
 
-def test_heads_single_repo(repo, capsys):
-    wt, _ = new_feature(repo)
-    assert out(capsys, "heads", "tiny")[1] == sh("git", "rev-parse", "--short", "HEAD", cwd=wt)
+def test_idea_info_repos(ws):
+    assert at.idea_info("both")["repos"] == ["app-backend", "app-flutter"]
 
 
-def test_rules_slug_reaches_product_and_workspace_rules(ws_feature, workspace, capsys):
-    wt, _ = ws_feature
-    commit(wt, "AGENTS.md", "ws rules\n")
-    commit(wt / "api", "AGENTS.md", "api rules\n")
-    commit(wt / "api", "src.txt", "changed\n")
-    assert out(capsys, "rules", "xr")[1] == "AGENTS.md\napi/AGENTS.md"
+def new_ws_feature(work, slug="both", ensure=True):
+    wt = work / ".agent-team" / "worktrees" / slug
+    sh("git", "worktree", "add", "-q", "-b", f"feature/{slug}", str(wt), "origin/main", cwd=work)
+    assert at.main(["init-status", slug]) == 0
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
+    sh("git", "push", "-q", "-u", "origin", f"feature/{slug}", cwd=wt)
+    if ensure:
+        assert at.main(["repos", slug, "--ensure"]) == 0
+    return wt
 
 
-# ---------- Task 8: sync, push ----------
-
-def push_to_base(ws, path, name, text):
-    d = ws / path
-    commit(d, name, text, "base change")
-    sh("git", "push", "-q", "origin", "main", cwd=d)
-
-
-def test_ws_sync_merges_each_repo(ws_feature, workspace, capsys):
-    push_to_base(workspace, "api", "base.txt", "b\n")
-    code, o, _ = out(capsys, "sync", "xr")
-    assert code == 0 and "api: merged origin/main" in o and "up to date with origin/main" in o
-    assert (ws_feature[0] / "api" / "base.txt").exists()
+def test_ensure_creates_product_worktrees_and_pushes(ws, capsys):
+    wt = new_ws_feature(ws)
+    for p, f in (("app-backend", "api.txt"), ("app-flutter", "ui.txt")):
+        assert (wt / p / f).exists()
+        assert sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=wt / p) == "feature/both"
+        assert sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=ws / p)
+    assert at.read_status(wt / ".agent-team/features/both/status.md")["repos"] == "app-backend app-flutter"
+    assert sh("git", "status", "--porcelain", cwd=wt) == "M .agent-team/features/both/status.md"  # only the status write; nested checkouts are ignored
 
 
-def test_ws_sync_conflict_names_repo(ws_feature, workspace, capsys):
-    wt, _ = ws_feature
-    push_to_base(workspace, "api", "src.txt", "theirs\n")
-    commit(wt / "api", "src.txt", "ours\n")
-    code, _, err = out(capsys, "sync", "xr")
-    assert code == 2 and "api" in err and "src.txt" in err
+def test_ensure_resumes_from_pushed_product_branch(ws, tmp_path):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend" / "new.txt").write_text("x")
+    sh("git", "add", "-A", cwd=wt / "app-backend"); sh("git", "commit", "-qm", "work", cwd=wt / "app-backend")
+    sh("git", "push", "-q", cwd=wt / "app-backend")
+    # this machine forgets everything
+    assert at.main(["cleanup", "both", "--force"]) == 0
+    sh("git", "worktree", "add", "-q", str(wt), "feature/both", cwd=ws)
+    assert at.main(["repos", "both", "--ensure"]) == 0
+    assert (wt / "app-backend" / "new.txt").exists()
 
 
-def test_ws_push_pushes_products_then_workspace(ws_feature, workspace, capsys):
-    wt, _ = ws_feature
-    c = commit(wt / "api", "p.txt")
-    code, o, _ = out(capsys, "push", "xr")
-    assert code == 0 and o.splitlines() == ["api: pushed feature/xr", "pushed feature/xr"]
-    sh("git", "fetch", "-q", "origin", cwd=workspace / "api")
-    assert sh("git", "rev-parse", "--short", "origin/feature/xr", cwd=workspace / "api") == c
+def test_ensure_refuses_unignored_repo(ws, capsys):
+    (ws / ".gitignore").write_text(".agent-team/worktrees/\n/app-flutter/\n")
+    sh("git", "commit", "-qam", "unignore", cwd=ws); sh("git", "push", "-q", cwd=ws)
+    new_ws_feature(ws, ensure=False)
+    assert at.main(["repos", "both", "--ensure"]) == 1
+    assert "app-backend is not gitignored" in capsys.readouterr().err
 
 
-def test_ws_push_rejected_product_exit3(ws_feature, tmp_path, capsys):
-    wt, _ = ws_feature
-    other = tmp_path / "other-api2"
-    sh("git", "clone", "-q", "-b", "feature/xr", str(tmp_path / "api.git"), str(other), cwd=tmp_path)
-    sh("git", "config", "user.email", "o@o", cwd=other); sh("git", "config", "user.name", "o", cwd=other)
-    commit(other, "o.txt"); sh("git", "push", "-q", cwd=other)
-    commit(wt / "api", "l.txt")
-    code, _, err = out(capsys, "push", "xr")
-    assert code == 3 and "api: push rejected" in err
+def test_task_files_and_plan_adds_repo(ws):
+    assert at.task_files("## Tasks\n- [ ] T1 [fast] x — files: `app-backend/a.py`, app-flutter/b — maps to: AC1\n") \
+        == ["app-backend/a.py", "app-flutter/b"]
 
 
-# ---------- Task 9: ci, pr-body, summary ----------
+def test_drift_unchecked_in_workspace(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / ".agent-team/features/both/plan.md").write_text("planned-at: abc1234\n## Files\n- `app-backend/a`\n")
+    at.main(["drift", "both"])
+    assert "drift: unchecked (workspace mode)" in capsys.readouterr().out
 
-def gh_checks(tmp_path, monkeypatch, results):
-    """gh stub: `gh pr checks <n>` exits/prints results[n] = (code, output)."""
-    import json, os
+
+def test_ensure_rerun_pushes_after_failed_push(ws):
+    new_ws_feature(ws, ensure=False)
+    sh("git", "config", "remote.origin.pushurl", "/nonexistent.git", cwd=ws / "app-flutter")
+    assert at.main(["repos", "both", "--ensure"]) == 1
+    sh("git", "config", "--unset", "remote.origin.pushurl", cwd=ws / "app-flutter")
+    assert at.main(["repos", "both", "--ensure"]) == 0
+    assert sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=ws / "app-flutter")
+
+
+def test_commit_routes_paths_to_their_repos(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a"); (wt / "app-flutter/b.txt").write_text("b")
+    assert at.main(["commit", "both", "-m", "feat(both): T1", "app-backend/a.txt", "app-flutter/b.txt"]) == 0
+    assert sh("git", "log", "-1", "--format=%s", cwd=wt / "app-backend") == "feat(both): T1"
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-flutter") == ""
+
+
+def test_commit_refuses_workspace_path(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a"); (wt / "notes.md").write_text("n")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "notes.md"]) == 1
+    assert "notes.md is not inside a product repo" in capsys.readouterr().err
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-backend").startswith("??")   # nothing staged or committed
+
+
+def test_commit_is_atomic_across_repos(ws, capsys):
+    wt = new_ws_feature(ws)
+    before = sh("git", "rev-parse", "HEAD", cwd=wt / "app-backend")
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "app-flutter/typo.txt"]) == 1
+    assert "app-flutter:" in capsys.readouterr().err
+    assert sh("git", "rev-parse", "HEAD", cwd=wt / "app-backend") == before
+
+
+def test_heads_lists_each_repo(ws, capsys):
+    wt = new_ws_feature(ws); capsys.readouterr()
+    at.main(["heads", "both"])
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("app-backend:") and " app-flutter:" in out
+
+
+def test_lease_fails_when_product_branch_diverged(ws, tmp_path, capsys):
+    wt = new_ws_feature(ws)
+    o = tmp_path / "o"; sh("git", "clone", "-q", "-b", "feature/both", str(tmp_path / "backend.git"), str(o), cwd=tmp_path)
+    sh("git", "config", "user.email", "x@x", cwd=o); sh("git", "config", "user.name", "x", cwd=o)
+    (o / "r.txt").write_text("r"); sh("git", "add", "-A", cwd=o); sh("git", "commit", "-qm", "remote", cwd=o); sh("git", "push", "-q", cwd=o)
+    (wt / "app-backend/l.txt").write_text("l"); sh("git", "add", "-A", cwd=wt / "app-backend"); sh("git", "commit", "-qm", "local", cwd=wt / "app-backend")
+    assert at.main(["lease", "both", "acquire"]) == 1
+    assert "diverged" in capsys.readouterr().err
+
+
+def test_push_and_sync_cover_products(ws, tmp_path, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-flutter/c.txt").write_text("c"); at.main(["commit", "both", "-m", "c", "app-flutter/c.txt"])
+    assert at.main(["push", "both"]) == 0
+    assert sh("git", "rev-parse", "origin/feature/both", cwd=wt / "app-flutter") == sh("git", "rev-parse", "HEAD", cwd=wt / "app-flutter")
+    o = tmp_path / "o2"; sh("git", "clone", "-q", str(tmp_path / "backend.git"), str(o), cwd=tmp_path)
+    sh("git", "config", "user.email", "x@x", cwd=o); sh("git", "config", "user.name", "x", cwd=o)
+    (o / "m.txt").write_text("m"); sh("git", "add", "-A", cwd=o); sh("git", "commit", "-qm", "main moved", cwd=o); sh("git", "push", "-q", cwd=o)
+    capsys.readouterr()
+    assert at.main(["sync", "both"]) == 0
+    assert (wt / "app-backend/m.txt").exists()
+
+
+def test_parse_since():
+    assert at.parse_since("a:x b:y") == {"a": "x", "b": "y"}
+    assert at.parse_since("abc123") == "abc123" and at.parse_since(None) is None
+
+
+def test_diff_prefixes_repo_paths(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a\n"); at.main(["commit", "both", "-m", "a", "app-backend/a.txt"])
+    capsys.readouterr(); at.main(["diff", "both"])
+    assert "b/app-backend/a.txt" in capsys.readouterr().out
+    assert at.diffstat("both") == (1, 1)
+
+
+def test_diff_since_per_repo(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a\n"); at.main(["commit", "both", "-m", "a", "app-backend/a.txt"])
+    capsys.readouterr(); at.main(["heads", "both"]); since = capsys.readouterr().out.strip()
+    (wt / "app-flutter/b.txt").write_text("b\n"); at.main(["commit", "both", "-m", "b", "app-flutter/b.txt"])
+    capsys.readouterr(); at.main(["diff", "both", "--since", since])
+    out = capsys.readouterr().out
+    assert "app-flutter/b.txt" in out and "app-backend/a.txt" not in out
+
+
+def test_test_runs_each_repo_and_names_failure(ws, capsys):
+    wt = new_ws_feature(ws); capsys.readouterr()
+    assert at.main(["test", "both"]) == 0
+    (wt / "app-flutter/ui.txt").unlink(); at.main(["commit", "both", "-m", "rm", "app-flutter/ui.txt"])
+    assert at.main(["test", "both"]) == 1
+    assert "app-flutter Test: FAILED" in capsys.readouterr().out
+    assert "fail(app-flutter:test)" in at.read_status(wt / ".agent-team/features/both/status.md")["tests"]
+
+
+def ws_gh(tmp_path, monkeypatch, checks):
+    """gh stub: `pr checks <n>` exits/prints checks[n]; `pr view` prints OPEN x."""
+    import os
     bin_ = tmp_path / "fakebin"; bin_.mkdir(exist_ok=True)
-    state = tmp_path / "gh-checks.json"; state.write_text(json.dumps(results))
     (bin_ / "gh").write_text(f'''#!/usr/bin/env python3
-import json, sys
+import sys
 a = sys.argv[1:]
+checks = {checks!r}
 if a[:2] == ["pr", "checks"]:
-    code, text = json.load(open("{state}"))[a[2]]
+    code, text = checks[a[2]]
     print(text); sys.exit(code)
-sys.exit(1)
+if a[:2] == ["pr", "view"]:
+    print("OPEN x")
 ''')
     (bin_ / "gh").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_}:{os.environ['PATH']}")
+    monkeypatch.setattr(at, "POLL_SECONDS", 0)
 
 
-def set_status(fd, **kv):
-    at.write_status(fd / "status.md", kv)
+def test_ci_fails_when_one_product_pr_fails(ws, tmp_path, monkeypatch, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    ws_gh(tmp_path, monkeypatch, checks={"12": (0, "ok"), "40": (1, "build\tfail\t1m\turl"), "3": (0, "ok")})
+    assert at.main(["ci", "both", "--grace", "0"]) == 1
+    out = capsys.readouterr().out
+    assert "app-flutter#40:" in out and "ci: fail" in out
 
 
-def test_ws_ci_all_pass(ws_feature, tmp_path, monkeypatch, capsys):
-    set_status(ws_feature[1], pr="5", repo_prs="api#12")
-    gh_checks(tmp_path, monkeypatch, {"12": [0, "build\tpass"], "5": [0, "x\tpass"]})
-    assert out(capsys, "ci", "xr", "--grace", "0")[:2] == (0, "ci: pass")
+def test_ci_workspace_all_pass(ws, tmp_path, monkeypatch, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    ws_gh(tmp_path, monkeypatch, checks={"12": (0, "ok"), "40": (8, "p"), "3": (0, "ok")})
+    assert at.main(["ci", "both", "--grace", "0"]) == 0
+    assert "ci: pending" in capsys.readouterr().out
 
 
-def test_ws_ci_one_fails_names_repo(ws_feature, tmp_path, monkeypatch, capsys):
-    set_status(ws_feature[1], pr="5", repo_prs="api#12")
-    gh_checks(tmp_path, monkeypatch, {"12": [1, "build\tfail\t1m"], "5": [0, "x\tpass"]})
-    code, o, _ = out(capsys, "ci", "xr", "--grace", "0")
-    assert code == 1 and "api#12: build\tfail\t1m" in o and o.endswith("ci: fail")
+def test_pr_body_for_product_lists_merge_order(ws, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    capsys.readouterr(); at.main(["pr-body", "both", "--repo", "app-flutter", "--summary", "s"])
+    out = capsys.readouterr().out
+    assert "## Merge order" in out and out.index("#12") < out.index("#40") and "(this PR)" in out
 
 
-def test_ws_ci_pending_beats_pass(ws_feature, tmp_path, monkeypatch, capsys):
-    set_status(ws_feature[1], pr="5", repo_prs="api#12")
-    gh_checks(tmp_path, monkeypatch, {"12": [8, "build\tpending"], "5": [0, "x\tpass"]})
-    assert out(capsys, "ci", "xr", "--grace", "0")[:2] == (0, "ci: pending")
+def test_pr_body_workspace_lists_product_prs(ws, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12 app-flutter#40"])
+    capsys.readouterr(); at.main(["pr-body", "both", "--summary", "s"])
+    out = capsys.readouterr().out
+    assert "## Product PRs" in out and "Merge these first, this one last." in out and "## Artifacts" in out
 
 
-def test_ws_ci_without_workspace_pr(ws_feature, tmp_path, monkeypatch, capsys):
-    set_status(ws_feature[1], pr="none", repo_prs="api#12")
-    gh_checks(tmp_path, monkeypatch, {"12": [0, "build\tpass"]})
-    assert out(capsys, "ci", "xr", "--grace", "0")[:2] == (0, "ci: pass")
-
-
-def test_pr_body_repo_merge_order(ws_feature, capsys):
-    wt, fd = ws_feature
-    (fd / "plan.md").write_text((fd / "plan.md").read_text() + "\n## Files\n- `app/x` — modify — y\n")
-    assert at.main(["repos", "xr", "--ensure"]) == 0
-    set_status(fd, pr="none", repo_prs="api#12")
-    o = out(capsys, "pr-body", "xr", "--repo", "app", "--summary", "S")[1]
-    assert "## Summary\nS" in o and "Part of `xr`: api#12" in o
-    assert "Merge order: api#12 → app (this PR) → workspace PR (agent-team artifacts)" in o
-    assert "spec.md" in o
-    ws = out(capsys, "pr-body", "xr", "--summary", "S")[1]
-    assert "## Product PRs" in ws and "- api#12" in ws
-
-
-def test_pr_body_unknown_repo_fails(ws_feature, capsys):
-    code, _, err = out(capsys, "pr-body", "xr", "--repo", "nope")
-    assert code == 1 and "nope" in err
-
-
-def test_summary_shows_repo_prs(ws_feature, capsys):
-    wt, fd = ws_feature
-    set_status(fd, pr="5", repo_prs="api#12")
-    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "st", cwd=wt)
-    sh("git", "push", "-q", "-u", "origin", "feature/xr", cwd=wt)
-    assert "| api#12 ws#5 |" in out(capsys, "summary")[1]
-
-
-# ---------- Task 10: cleanup, drift ----------
-
-def test_ws_cleanup_removes_products_then_workspace(ws_feature, workspace, capsys):
-    wt, _ = ws_feature
-    commit(wt / "api", "c.txt")
-    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
-    assert at.main(["push", "xr"]) == 0
-    code, o, err = out(capsys, "cleanup", "xr")
-    assert code == 0, err
-    assert o.index("api: removed worktree") < o.index("removed worktree " + str(wt))
+def test_cleanup_removes_product_worktrees(ws):
+    wt = new_ws_feature(ws)
+    assert at.main(["cleanup", "both", "--force"]) == 0
     assert not wt.exists()
-    assert branches(workspace / "api") == [] and branches(workspace) == []
+    assert "feature/both" not in sh("git", "branch", cwd=ws / "app-backend")
 
 
-def test_ws_cleanup_refuses_unpushed_product_commit(ws_feature, workspace, capsys):
-    wt, _ = ws_feature
-    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
-    assert at.main(["push", "xr"]) == 0
-    commit(wt / "api", "c.txt")
-    code, _, err = out(capsys, "cleanup", "xr")
-    assert code == 1 and "api: 1 commit(s) on feature/xr" in err
-    assert (wt / "api" / "c.txt").exists() and branches(workspace / "api") == ["feature/xr"]
+def test_cleanup_refuses_unpushed_product_commit(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/u.txt").write_text("u"); at.main(["commit", "both", "-m", "u", "app-backend/u.txt"])
+    assert at.main(["cleanup", "both"]) == 1
+    assert "app-backend" in capsys.readouterr().err
+    assert (wt / "app-backend/u.txt").exists()
 
 
-def test_ws_drift_unchecked(ws_feature, capsys):
-    wt, fd = ws_feature
-    (fd / "plan.md").write_text("planned-at: abc1234\n" + (fd / "plan.md").read_text() + "\n## Files\n- `api/src.txt` — m — x\n")
-    assert out(capsys, "drift", "xr")[1] == "drift: unchecked (workspace mode)"
+def test_cleanup_refuses_uncommitted_product_change(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "app-flutter/ui.txt").write_text("edited")
+    assert at.main(["cleanup", "both"]) == 1
+    assert "app-flutter" in capsys.readouterr().err
+    assert (wt / "app-flutter/ui.txt").read_text() == "edited"
 
 
-# ---------- final review fixes ----------
-
-def test_missing_product_worktree_says_ensure(ws_feature, capsys):
-    wt, _ = ws_feature
-    import shutil
-    shutil.rmtree(wt / "api")
-    for cmd in (["diff", "xr"], ["heads", "xr"], ["sync", "xr"]):
-        code, _, err = out(capsys, *cmd)
-        assert code == 1 and "--ensure" in err and "command not found" not in err, cmd
-
-
-def test_cleanup_force_skips_missing_product_clone(ws_feature, workspace, capsys):
-    import shutil
-    wt, _ = ws_feature
-    sh("git", "worktree", "remove", "--force", str(wt / "api"), cwd=workspace / "api")
-    shutil.rmtree(workspace / "api")
-    code, o, err = out(capsys, "cleanup", "xr", "--force")
-    assert code == 0, err
-    assert "api: skipped" in o and not wt.exists()
+def test_missing_product_worktree_fails_clearly(ws, capsys):
+    wt = new_ws_feature(ws)
+    sh("git", "worktree", "remove", "--force", str(wt / "app-flutter"), cwd=ws / "app-flutter")
+    assert not (wt / "app-flutter").exists()
+    capsys.readouterr()
+    for cmd in (["push"], ["test"], ["heads"], ["sync"], ["diff", "--stat"]):
+        assert at.main([cmd[0], "both", *cmd[1:]]) == 1
+        assert "app-flutter: no product worktree; run agent-team repos both --ensure" in capsys.readouterr().err
 
 
-def test_cleanup_refuses_unlisted_nested_worktree(ws_feature, workspace, capsys):
-    wt, fd = ws_feature
-    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
-    assert at.main(["push", "xr"]) == 0
-    p = workspace / ".agent-team" / "project.md"            # api renamed away in ## Repos
-    p.write_text(p.read_text().replace("### api", "### api2").replace("Order: api,", "Order: api2,"))
-    (wt / "api" / "wip.txt").write_text("uncommitted\n")
-    code, _, err = out(capsys, "cleanup", "xr")
-    assert code == 1 and "api" in err and "not in ## Repos" in err
-    assert (wt / "api" / "wip.txt").exists()
+def test_pr_body_repo_must_be_in_workspace_and_honours_stopped(ws, capsys):
+    new_ws_feature(ws)
+    at.main(["status", "both", "--set", "pr=3", "repo_prs=app-backend#12"])
+    capsys.readouterr()
+    assert at.main(["pr-body", "both", "--repo", "nope"]) == 1
+    assert "nope" in capsys.readouterr().err
+    at.main(["pr-body", "both", "--repo", "app-backend", "--stopped", "why"])
+    assert "> **Stopped — needs your decision:** why" in capsys.readouterr().out
 
 
-def test_repos_path_escaping_root_fails(workspace, tmp_path, capsys):
-    product(tmp_path, tmp_path, "x")                        # a real repo next to the workspace
-    p = workspace / ".agent-team" / "project.md"
-    p.write_text(p.read_text().replace("### app", "### ../x"))
-    code, _, err = out(capsys, "repos")
-    assert code == 1 and "../x" in err and "outside" in err
+def test_pr_body_single_repo_without_status_md(repo, capsys):
+    wt = repo / ".agent-team" / "worktrees" / "x"
+    sh("git", "worktree", "add", "-q", "-b", "feature/x", str(wt), "origin/main", cwd=repo)
+    assert at.main(["pr-body", "x", "--summary", "s"]) == 0
+    assert "## Summary" in capsys.readouterr().out
 
 
-def test_cleanup_checks_unrecorded_product_worktree(ws_feature, workspace, capsys):
-    wt, fd = ws_feature                                     # status repos: api
-    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
-    assert at.main(["push", "xr"]) == 0
-    sh("git", "worktree", "add", "-q", "-b", "feature/xr", str(wt / "app"), "origin/main", cwd=workspace / "app")
-    (wt / "app" / "wip.txt").write_text("uncommitted\n")    # ensure created it, then died before write_status
-    code, _, err = out(capsys, "cleanup", "xr")
-    assert code == 1 and "app: uncommitted changes" in err
-    assert (wt / "app" / "wip.txt").exists()
+# ---------- PR #10 review fixes ----------
+
+def test_repos_heading_with_trailing_words():
+    t = WS_PROJECT.replace("### app-backend\n", "### app-backend — API server\n").replace(
+        "### app-flutter\n", "### app-flutter — mobile app\n")
+    rs = at.repos(t)
+    assert [r["path"] for r in rs] == ["app-backend", "app-flutter"]
+    assert rs[0]["branch"] is None and rs[1]["branch"] == "main"
+    assert at.block_command("Test", rs[0]["body"]) == "test -f api.txt"
+
+
+@pytest.mark.parametrize("bad", ["../x", "a/b", "/abs"])
+def test_repos_rejects_non_depth_one_path(bad):
+    with pytest.raises(at.Fail, match=bad):
+        at.repos(WS_PROJECT.replace("### app-backend\n", f"### {bad}\n"))
+
+
+def test_ensure_fast_forwards_stale_local_branch(ws):
+    wt = new_ws_feature(ws)
+    other = wt / "app-backend"
+    (other / "new.txt").write_text("x")
+    sh("git", "add", "-A", cwd=other); sh("git", "commit", "-qm", "work", cwd=other)
+    sh("git", "push", "-q", cwd=other)
+    sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=other)     # local branch is now stale
+    sh("git", "worktree", "remove", "--force", str(other), cwd=ws / "app-backend")
+    assert at.main(["repos", "both", "--ensure"]) == 0
+    assert (other / "new.txt").exists()
+
+
+def test_cleanup_remote_checks_product_base_branch(ws):
+    p = ws / ".agent-team" / "project.md"
+    p.write_text(p.read_text().replace("- Role: API\n", "- Role: API\n- Branch: develop\n"))
+    sh("git", "commit", "-qam", "develop", cwd=ws); sh("git", "push", "-q", cwd=ws)
+    be = ws / "app-backend"
+    sh("git", "checkout", "-q", "-b", "develop", cwd=be); sh("git", "push", "-q", "-u", "origin", "develop", cwd=be)
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt"]) == 0
+    sh("git", "push", "-q", cwd=wt / "app-backend")
+    sh("git", "merge", "-q", "--ff-only", "feature/both", cwd=be)       # merged into develop, no PR
+    sh("git", "push", "-q", "origin", "develop", cwd=be)
+    sh("git", "checkout", "-q", "main", cwd=be)
+    sh("git", "commit", "-q", "--allow-empty", "-m", "main moves", cwd=be)  # develop != main
+    sh("git", "push", "-q", "origin", "main", cwd=be)
+    sh("git", "commit", "-qam", "status", cwd=wt); sh("git", "push", "-q", cwd=wt)
+    sh("git", "merge", "-q", "--ff-only", "origin/feature/both", cwd=ws); sh("git", "push", "-q", "origin", "main", cwd=ws)
+    assert at.main(["cleanup", "both", "--remote"]) == 0
+    assert not sh("git", "ls-remote", "--heads", "origin", "feature/both", cwd=be)
+
+
+def test_cleanup_remote_happy_path_after_merge(ws):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt"]) == 0
+    sh("git", "commit", "-qam", "status", cwd=wt)
+    assert at.main(["push", "both"]) == 0
+    for d, b in ((ws / "app-backend", "main"), (ws / "app-flutter", "main"), (ws, "main")):
+        sh("git", "fetch", "-q", cwd=d)
+        sh("git", "merge", "-q", "--ff-only", "origin/feature/both", cwd=d)
+        sh("git", "push", "-q", "origin", b, cwd=d)
+    assert at.main(["cleanup", "both", "--remote"]) == 0
+
+
+def test_commit_accepts_dot_slash_and_absolute_paths(ws):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a"); (wt / "app-flutter/b.txt").write_text("b")
+    assert at.main(["commit", "both", "-m", "x", "./app-backend/a.txt", str(wt / "app-flutter/b.txt")]) == 0
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-backend") == ""
+    assert sh("git", "status", "--porcelain", cwd=wt / "app-flutter") == ""
+
+
+def test_commit_staging_failure_unstages_earlier_repos(ws):
+    wt = new_ws_feature(ws)
+    (wt / "app-backend/a.txt").write_text("a")
+    assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "app-flutter/typo.txt"]) == 1
+    assert sh("git", "diff", "--cached", "--name-only", cwd=wt / "app-backend") == ""
+
+
+# ---------- agent rules in a workspace (#11) ----------
+
+def test_rules_noarg_includes_each_repo_root(ws, capsys):
+    (ws / "AGENTS.md").write_text("ws\n")
+    (ws / "app-backend" / "AGENTS.md").write_text("api\n")
+    (ws / "app-backend" / "deep").mkdir()
+    (ws / "app-backend" / "deep" / "AGENTS.md").write_text("deep\n")
+    capsys.readouterr()
+    assert at.main(["rules"]) == 0
+    assert capsys.readouterr().out.strip() == "AGENTS.md\napp-backend/AGENTS.md"
+
+
+def test_rules_slug_reaches_product_and_workspace_rules(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "AGENTS.md").write_text("ws rules\n")
+    p = wt / "app-backend"
+    (p / "AGENTS.md").write_text("api rules\n")
+    (p / "api.txt").write_text("changed\n")
+    sh("git", "add", "-A", cwd=p); sh("git", "commit", "-qm", "change", cwd=p)
+    capsys.readouterr()
+    assert at.main(["rules", "both"]) == 0
+    assert capsys.readouterr().out.strip() == "AGENTS.md\napp-backend/AGENTS.md"

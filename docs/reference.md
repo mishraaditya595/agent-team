@@ -1,6 +1,6 @@
 # Reference
 
-Technical details for agent-team. For the overview, see the [README](../README.md).
+Technical details for solo-squad. For the overview, see the [README](../README.md).
 
 ## Install (on every machine)
 
@@ -13,8 +13,10 @@ pip install pyyaml            # for the Codex profiles step
 `install.sh` links the skills into `~/.claude/skills` and `~/.agents/skills` (read by Codex and other tools), puts the **`agent-team` helper CLI** on your PATH (`~/.local/bin`), and writes `at-deep` / `at-standard` / `at-fast` profiles (model + reasoning effort) into `~/.codex/config.toml` without touching your other settings. It's safe to re-run; `git pull` + re-run to update.
 
 Alternatives (both skip the PATH step — the workflows then call `python3 <team-build skill>/scripts/agent_team.py`, which asks for permission the first time):
-- **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add mishraaditya595/agent-team`, then `/plugin install agent-team@agent-team`.
+- **Claude Code plugin** (also installs the role subagents pinned to their models): `/plugin marketplace add mishraaditya595/agent-team`, then `/plugin install solo-squad@solo-squad`.
 - **Any Agent Skills tool:** `npx skills add mishraaditya595/agent-team`.
+
+**Upgrading from the `agent-team` plugin (0.3.0 or earlier):** `/plugin uninstall agent-team@agent-team`, `/plugin marketplace remove agent-team`, then add the marketplace again and `/plugin install solo-squad@solo-squad`. The `agent-team` CLI and `.agent-team/` folders don't change.
 
 ## First run in a product repo
 
@@ -38,10 +40,6 @@ If `main` is branch-protected (or `project.md` `## Conventions` has `- docs-push
 
 If your repo keeps rules for agents in `AGENTS.md`/`CLAUDE.md` (at the root or in subfolders), the roles follow them without relying on the tool to load them: the Tech Lead copies the rules that bind a change into the plan's `## Global constraints` (citing the file), the Reviewer checks the diff against them, and the PM doesn't spec against them. `agent-team rules` finds them.
 
-## Workspaces (several repos)
-
-A product made of several repos cloned (gitignored) inside one parent repo works too: run everything from the parent. `team-init` lists the nested repos under `## Repos` in `project.md`; add the order they ship in and the contracts between them under `## Cross-repo rules`. Ideas name the repos they touch, and `team-build` gives each touched repo its own worktree inside the feature's, then opens one PR per repo plus one for the artifacts, with the merge order in each.
-
 ## The helper CLI
 
 The workflows hand every deterministic step to `agent-team` (stdlib Python, `skills/team-build/scripts/agent_team.py`) instead of having the model work it out each time — cheaper and exact:
@@ -58,14 +56,16 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `push <slug>` / `lease <slug>` | push with a clear message on rejection (never forced); a lease that's committed and pushed, so only one machine runs a feature |
 | `next <slug> review\|qa` | the next review/QA file number — continues across stops, so earlier reports are never overwritten |
 | `status` / `log` / `init-status` | read and write `status.md` with a fixed schema |
-| `ci <slug>` / `pr-body <slug> [--repo <repo>]` | PR checks result (every product PR too, in a workspace); PR body with artifact links, the decisions to check (assumed grill answers, developer rulings) and the tier/cost log |
+| `ci <slug>` / `pr-body <slug>` | PR checks result; PR body with artifact links, the decisions to check (assumed grill answers, developer rulings) and the tier/cost log |
 | `idea <slug> [--set …\|--show]` / `summary` | idea lifecycle and lookup; all-feature summary |
 | `cleanup <slug> [--remote]` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work, and `--remote` deletes the remote branch only if it was merged (`--force` to override) |
 | `pull` / `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected or `docs-push: pr-only` is set; `pull` replaces `git pull` in the workflows |
-| `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version; adds `## Repos` when it finds nested product repos |
+| `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
 | `rules [<slug>\|<path>…]` | the repo's `AGENTS.md`/`CLAUDE.md` files governing a feature's paths (subfolders, nested product repos, the workspace root), so roles follow them on every tool |
-| `repos [<slug> [--ensure]]` | workspace mode: the product repos in `## Repos`; `--ensure` creates a feature's product worktrees |
-| `heads <slug>` | the value for `last_reviewed_commit` (`<repo>:<sha>` per repo in a workspace) |
+
+## Workspaces
+
+A workspace is a directory (its own git repo) that holds several product repos side by side. Its `project.md` has `## Repos` (path, `Order:` = merge order, `## Cross-repo rules`). Features run in a worktree of the workspace repo with nested product worktrees under it (`agent-team repos <slug> --ensure`). Each touched repo gets its own `feature/<slug>` PR, plus one workspace PR that carries the spec and plan and lists the product PRs. Merge product PRs in `Order:`, the workspace PR last; `team-wrap` checks all of them. Without `## Repos`, nothing changes.
 
 ## Models and cost
 

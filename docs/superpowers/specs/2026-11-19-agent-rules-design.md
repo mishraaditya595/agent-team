@@ -2,6 +2,8 @@
 
 Issues: [#11](https://github.com/mishraaditya595/solo-squad/issues/11) (roles read the repo's own `AGENTS.md`/`CLAUDE.md`), and Parts 2–3 of [#8](https://github.com/mishraaditya595/solo-squad/issues/8) (`docs/superpowers/specs/2026-11-18-multi-repo-workspaces-design.md`, unchanged except where noted below). Status: approach B (one PR) picked by the owner; design for review.
 
+> **Update:** workspace mode (#8 Parts 2–3) landed separately in PR #10. This PR now carries #11 only, built on #10's workspace helpers (`ws_repos`, `ws_diffs`); the workspace sections below are kept for history.
+
 ## Intent
 
 Repos write down the rules a change must follow (stack quirks, forbidden patterns, migration order, where docs go) in `AGENTS.md`/`CLAUDE.md`, at the root and in subfolders. No role reads them today, and whether the host tool auto-loads them depends on the tool and the cwd, so a diff can break a written rule, pass review and reach Gate 2 green. Workspace mode (#8) makes it worse: product worktrees sit nested under the workspace worktree, never on the cwd path. Fix: find the rules deterministically, read them once at the expensive tier, hand the binding parts down through the plan, and have the Reviewer check the diff against them.

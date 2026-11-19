@@ -11,6 +11,6 @@ metadata:
 2. Show the table as printed. Tokens and cost appear only where the tool reported them (see the team-build skill's dispatch notes); `-` means not reported.
 3. Under it, one line per feature that needs the owner, with the next command:
    - `stopped` → the stop reason, and "fix it on `feature/<slug>`, then `team-build <slug>`";
-   - `pr-open` → "merge PR #<n>, then `team-wrap <slug>`" (in a workspace the PR column reads `api#12 app#40 ws#5`: merge in that order);
+   - `pr-open` → "merge PR #<n>, then `team-wrap <slug>`" (in a workspace, list the product PRs in merge order, then the workspace PR);
    - `merged` → "`team-market <slug>` if you want outreach drafts".
 4. Don't change any files.

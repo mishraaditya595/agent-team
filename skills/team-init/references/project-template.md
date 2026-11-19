@@ -27,8 +27,6 @@
 <Code style, branching, commit style, folders to never touch.>
 <!-- Optional: `- docs-push: pr-only` sends every agent-team docs push through an agent-team/meta PR, even if the default branch isn't protected. -->
 
-<!-- Workspace with product repos cloned inside it (gitignored)? team-init adds `## Repos` (one `### <path>` block per repo, with its own Install/Build/Test lines) and `## Cross-repo rules` (`- Order: …` plus free text). -->
-
 ## Intent docs
 <!-- Paths of docs that record decisions and direction: ADRs (docs/adr/, docs/decisions/), PRDs or specs, PRODUCT.md, CONTEXT.md, DESIGN.md. Roles read these before proposing or flagging anything; a decision recorded here is settled. -->
 none

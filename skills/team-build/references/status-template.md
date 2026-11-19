@@ -2,6 +2,8 @@
 stage: spec            # spec | grill | plan | implement | review | qa | pr | ci | pr-open | merged | marketed | stopped
 branch: feature/<slug>
 pr: none               # PR number once opened
+repos: none   # workspace: touched product repos, in ship order
+repo_prs: none   # workspace: "<path>#<n> …" product PRs
 owner: none            # "<host> <utc time>" while a machine runs it (lease); none when idle
 worktree: .agent-team/worktrees/<slug>
 grill_round: 0

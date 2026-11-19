@@ -43,7 +43,7 @@ Adapted from obra/superpowers `writing-plans` and `test-driven-development` (MIT
 
 1. **Fit the codebase.** Follow the patterns already there. Name the existing feature you're modelling on.
 2. **Apply the YAGNI ladder** (`engineering-guidelines`): reuse → stdlib/native → small new code → new dependency only with a reason.
-3. **Map files before tasks.** Which files are created or changed, and what each is responsible for. One clear job per file; files that change together live together. **Workspace** (`project.md` has `## Repos`): read `## Repos` and `## Cross-repo rules`; paths are `<repo>/<path>`; every task's files live in exactly one product repo (a task that needs workspace files is a `## Spec problems` entry); tasks for an earlier repo in `Order:` come first. Leave `planned-at` as the workspace merge-base (drift isn't checked in workspaces).
+3. **Map files before tasks.** Which files are created or changed, and what each is responsible for. One clear job per file; files that change together live together.
 4. **Copy the spec's hard values** (limits, copy text, version floors) into `## Global constraints` verbatim. Every task obeys them. Then run `agent-team rules <the paths in ## Files>`, read what it lists, and copy each rule that binds this change as `- <rule> (source: <path>)` — into `## Global constraints`, or into the one task it governs. Only the rules this change can break; the developer and QA don't read the rules files themselves.
 5. **Break the work into tasks.** Each task is the smallest change that carries its own test and that a reviewer could reject on its own — fold setup and config into the task that needs them. Each task maps to at least one AC (or a `## Decisions` line). Tag its tier:
    - `[fast]` — mechanical: follows an existing pattern, the plan names the function and the test, little judgement needed.
@@ -53,6 +53,7 @@ Adapted from obra/superpowers `writing-plans` and `test-driven-development` (MIT
 7. **Test-first, always.** Every task starts with a test the developer writes, runs and must **watch it fail** for the right reason before writing code. A test that passes before the code exists is a broken test. Test real behaviour, not mocks. If the project has no tests, the first task sets up the project's standard framework.
 8. **Write `## Review focus`:** up to 5 inputs or failure modes the spec implies but no task's tests exercise yet, most likely to bite a real user first. For each, add a test to the task that owns that code. Empty means you checked and found none.
 9. **Fill the header and `## Security touchpoints` exactly** (`qa-ui: yes|no`, `planned-at:` = `git rev-parse --short $(git merge-base HEAD origin/<default>)`, `none` or a list): the workflow reads them to pick the QA and Reviewer tiers and to check the plan for drift.
+In a workspace (`project.md` has `## Repos`) every task's `files:` lie inside exactly one `### <path>` repo, tasks for earlier repos in `Order:` come first, and a task that needs workspace-level files goes to `## Spec problems` instead.
 10. **Say what not to do.** List tempting changes that are out of scope.
 11. **Run the self-review** in `references/plan-checklist.md` and fix what it finds inline.
 

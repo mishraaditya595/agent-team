@@ -54,7 +54,7 @@ cat <<MSG
 
 Done. Alternatives:
   Claude Code plugin (adds the role subagents too):
-    /plugin marketplace add mishraaditya595/agent-team   then   /plugin install agent-team@agent-team
+    /plugin marketplace add mishraaditya595/agent-team   then   /plugin install solo-squad@solo-squad
   Any Agent Skills tool:
     npx skills add mishraaditya595/agent-team
 MSG

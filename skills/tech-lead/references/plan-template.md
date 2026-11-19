@@ -34,7 +34,7 @@ none
 - <input or condition> → <what a reasonable user expects> — test in T<n>
 
 ## Tasks
-- [ ] T1 [fast] <title> — files: <path>, <path> — maps to: AC1
+- [ ] T1 [fast] <title> — files: <path>, <path> <!-- workspace: all inside one `### <path>` repo; earlier repos in `Order:` first --> — maps to: AC1
   - Interfaces: consumes <none | T<n>'s `name(args) -> Type`> · produces `<name(args) -> Type>`
   - Failing test: `<test file>::<test name>` — asserts <exact values from the spec>
   - Run: `<command for this test>` · Expected: fails (<reason>) → passes after the change

@@ -76,7 +76,15 @@ def test_plugin_manifests_parse():
     from conftest import ROOT
     plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
     market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
-    assert plugin["name"] == "agent-team" == market["plugins"][0]["name"]
+    assert plugin["name"] == "solo-squad" == market["plugins"][0]["name"] == market["name"]
+
+
+def test_namespaced_agent_fallback_uses_plugin_name():
+    import json
+    from conftest import ROOT
+    name = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())["name"]
+    text = (ROOT / "skills/team-build/references/dispatch-claude.md").read_text()
+    assert f"`{name}:<role>`" in text
 
 
 def test_models_yaml_missing_tool(make_repo):
