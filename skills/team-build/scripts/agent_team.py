@@ -581,6 +581,58 @@ def code_key(wt):
     return git("log", "-1", "--format=%h", "--", ".", ":(exclude).agent-team", cwd=wt) or None
 
 
+# ---------- agent rules (the repo's own AGENTS.md / CLAUDE.md) ----------
+
+RULES_FILES = ("AGENTS.md", "CLAUDE.md")
+
+
+def rules_root():
+    """Nearest folder at or above the cwd holding .agent-team/ (a feature worktree or the main checkout)."""
+    for d in (Path.cwd(), *Path.cwd().parents):
+        if (d / ".agent-team").is_dir():
+            return d
+    return repo_root()
+
+
+def _include_only(f, listed):
+    """A CLAUDE.md whose every line is `@<file>` naming a file already listed adds nothing."""
+    lines = [l.strip() for l in f.read_text(errors="replace").splitlines() if l.strip()]
+    return bool(lines) and all(l.startswith("@") and os.path.realpath(f.parent / l[1:]) in listed for l in lines)
+
+
+def rule_files(root, paths, fallback=None):
+    """Rules files governing paths: each AGENTS.md/CLAUDE.md from the path's folder up to root, root-most first.
+    A folder missing under root (product worktree not created yet) is read from fallback instead."""
+    root = Path(root).resolve()
+    folders = set()
+    for p in paths:
+        if Path(p).is_absolute() or ".." in Path(os.path.normpath(p)).parts:
+            raise Fail(f"{p} is outside the repo root {root}")
+        rel = Path(os.path.normpath(p))
+        d = rel if (root / rel).is_dir() or (fallback and (Path(fallback) / rel).is_dir()) else rel.parent
+        folders.update([d, *d.parents])
+    out, real = [], set()
+    for d in sorted(folders, key=lambda d: (len(d.parts), d.as_posix())):
+        base = root if (root / d).is_dir() or not fallback else Path(fallback)
+        for name in RULES_FILES:
+            f = base / d / name
+            if not f.is_file():
+                continue
+            rp = os.path.realpath(f)
+            if rp in real or (name == "CLAUDE.md" and _include_only(f, real)):
+                continue
+            real.add(rp)
+            out.append((d / name).as_posix())
+    return out
+
+
+def feature_paths(slug):
+    """Files the feature touches: its diff plus the plan's ## Files (which may not exist yet)."""
+    paths = git("diff", "--name-only", *diff_args(slug), cwd=work_dir(slug)).splitlines()
+    plan = feature_dir(work_dir(slug), slug) / "plan.md"
+    return list(dict.fromkeys(paths + (plan_files(plan.read_text()) if plan.exists() else [])))
+
+
 # ---------- commands ----------
 
 def cmd_default_branch(a):
@@ -750,6 +802,16 @@ def cmd_drift(a):
     changed = git("diff", "--name-only", sha, f"origin/{d}", "--", *files, cwd=wt).split()
     print(f"drift: {', '.join(changed) if changed else 'none'}")
     return 0
+
+
+def cmd_rules(a):
+    t = a.targets
+    if len(t) == 1 and feature_dir(work_dir(t[0]), t[0]).is_dir():
+        root, paths = work_dir(t[0]), feature_paths(t[0])
+    else:
+        root, paths = rules_root(), t or ["."]
+    found = rule_files(root, paths, fallback=repo_root() if root != repo_root() else None)
+    print("\n".join(found) if found else "none")
 
 
 def cmd_audit_path(a):
@@ -1382,6 +1444,8 @@ def build_parser():
     s.add_argument("slug"); s.set_defaults(fn=cmd_tasks)
     s = sub.add_parser("drift", help="files in plan.md changed on the default branch since planned-at")
     s.add_argument("slug"); s.set_defaults(fn=cmd_drift)
+    s = sub.add_parser("rules", help="the repo's AGENTS.md/CLAUDE.md files governing a feature's or some paths' code")
+    s.add_argument("targets", nargs="*", metavar="SLUG|PATH"); s.set_defaults(fn=cmd_rules)
     s = sub.add_parser("audit-path", help="next free audit report path, and earlier audit reports")
     s.add_argument("--date", help="YYYY-MM-DD (default: today, UTC)"); s.set_defaults(fn=cmd_audit_path)
     s = sub.add_parser("next", help="next review-N.md / qa-N.md number (continues after stops) and the previous file")
