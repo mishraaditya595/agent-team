@@ -59,6 +59,11 @@ class Fail(Exception):
 # ---------- small helpers ----------
 
 def run(cmd, cwd=None, check=True, shell=False):
+    if cwd and not Path(cwd).is_dir():     # else subprocess blames the binary ("command not found")
+        msg = f"no folder {cwd} (a workspace product worktree? `agent-team repos <slug> --ensure` re-creates it)"
+        if check:
+            raise Fail(msg)
+        return subprocess.CompletedProcess(cmd, 1, "", msg)
     try:
         r = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, shell=shell)
     except FileNotFoundError:
@@ -1368,12 +1373,26 @@ def cmd_cleanup(a):
     sp = status_path(a.slug)
     st = read_status(sp) if sp.exists() else {}
     prs = dict(parse_repo_prs(st.get("repo_prs")))
-    rs = status_repos(a.slug) or ([r for r in repos() if product_wt(a.slug, r["path"]).exists()]
-                                  if read_doc(".agent-team/project.md") is not None else [])
-    jobs = [_cleanup_one(repo_dir(r["path"]), product_wt(a.slug, r["path"]), branch, prs.get(r["path"], "none"),
-                         a.remote, f"{r['path']}: ") for r in rs]
+    listed = repos() if read_doc(".agent-team/project.md") is not None else []
+    rs = status_repos(a.slug) or [r for r in listed if product_wt(a.slug, r["path"]).exists()]
+    problems, jobs = [], []
+    for name in st.get("repos", "none").split():
+        if name != "none" and name not in {r["path"] for r in listed} and product_wt(a.slug, name).exists():
+            problems.append(f"{name}: product worktree {product_wt(a.slug, name)} is in status.md but not in "
+                            f"## Repos — clean it up in that repo by hand")
+    for r in rs:
+        try:
+            d = repo_dir(r["path"])
+        except Fail as e:
+            if not a.force:
+                problems.append(str(e))
+            else:
+                print(f"{r['path']}: skipped ({e})")
+            continue
+        jobs.append(_cleanup_one(d, product_wt(a.slug, r["path"]), branch, prs.get(r["path"], "none"),
+                                 a.remote, f"{r['path']}: "))
     jobs.append(_cleanup_one(root, worktree(a.slug), branch, st.get("pr", "none"), a.remote))
-    problems = [p for ps, _ in jobs for p in ps]
+    problems += [p for ps, _ in jobs for p in ps]
     if problems and not a.force:
         raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's really "
                    "what you want.")

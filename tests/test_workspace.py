@@ -449,3 +449,36 @@ def test_ws_drift_unchecked(ws_feature, capsys):
     wt, fd = ws_feature
     (fd / "plan.md").write_text("planned-at: abc1234\n" + (fd / "plan.md").read_text() + "\n## Files\n- `api/src.txt` — m — x\n")
     assert out(capsys, "drift", "xr")[1] == "drift: unchecked (workspace mode)"
+
+
+# ---------- final review fixes ----------
+
+def test_missing_product_worktree_says_ensure(ws_feature, capsys):
+    wt, _ = ws_feature
+    import shutil
+    shutil.rmtree(wt / "api")
+    for cmd in (["diff", "xr"], ["heads", "xr"], ["sync", "xr"]):
+        code, _, err = out(capsys, *cmd)
+        assert code == 1 and "--ensure" in err and "command not found" not in err, cmd
+
+
+def test_cleanup_force_skips_missing_product_clone(ws_feature, workspace, capsys):
+    import shutil
+    wt, _ = ws_feature
+    sh("git", "worktree", "remove", "--force", str(wt / "api"), cwd=workspace / "api")
+    shutil.rmtree(workspace / "api")
+    code, o, err = out(capsys, "cleanup", "xr", "--force")
+    assert code == 0, err
+    assert "api: skipped" in o and not wt.exists()
+
+
+def test_cleanup_refuses_unlisted_nested_worktree(ws_feature, workspace, capsys):
+    wt, fd = ws_feature
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
+    assert at.main(["push", "xr"]) == 0
+    p = workspace / ".agent-team" / "project.md"            # api renamed away in ## Repos
+    p.write_text(p.read_text().replace("### api", "### api2").replace("Order: api,", "Order: api2,"))
+    (wt / "api" / "wip.txt").write_text("uncommitted\n")
+    code, _, err = out(capsys, "cleanup", "xr")
+    assert code == 1 and "api" in err and "not in ## Repos" in err
+    assert (wt / "api" / "wip.txt").exists()
