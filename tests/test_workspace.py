@@ -91,3 +91,34 @@ def test_rules_noarg_includes_repo_roots(workspace, capsys):
     (workspace / "api" / "deep").mkdir()
     (workspace / "api" / "deep" / "AGENTS.md").write_text("deep\n")
     assert out(capsys, "rules")[1] == "AGENTS.md\napi/AGENTS.md"
+
+
+# ---------- Task 4: team-init / upgrade ----------
+
+def test_upgrade_adds_repos_only_when_nested(repo, tmp_path, capsys):
+    assert at.main(["upgrade"]) == 0
+    assert "Repos" not in capsys.readouterr().out
+    assert "## Repos" not in (repo / ".agent-team" / "project.md").read_text()
+    sh("git", "add", "-A", cwd=repo); sh("git", "commit", "-qm", "upgrade", cwd=repo)
+    for name in ("app", "api"):
+        product(tmp_path, repo, name)
+    (repo / ".gitignore").write_text(".agent-team/worktrees/\n/app/\n/api/\n")
+    sh("git", "commit", "-qam", "ignore", cwd=repo)
+    assert at.main(["upgrade"]) == 0
+    assert "Repos, Cross-repo rules" in capsys.readouterr().out
+    text = (repo / ".agent-team" / "project.md").read_text()
+    assert [r["path"] for r in at.repos(text)] == ["api", "app"]
+    assert "- Order: api, app" in at.section(text, "Cross-repo rules")
+    assert at.block_command(at.repos(text)[0]["block"], "Test") is None       # owner/agent fills commands
+
+
+def test_upgrade_ignores_unignored_nested_repo(repo, tmp_path, capsys):
+    product(tmp_path, repo, "extra")                      # nested repo, but not gitignored by the workspace
+    assert at.nested_repos(repo) == []
+    assert at.main(["upgrade"]) == 0
+    assert "## Repos" not in (repo / ".agent-team" / "project.md").read_text()
+
+
+def test_merged_allow_includes_repo_commands(workspace):
+    allow = at.merged_allow([], (workspace / ".agent-team" / "project.md").read_text())
+    assert "Bash(npm ci:*)" in allow and allow.count("Bash(true:*)") == 1

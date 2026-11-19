@@ -1401,10 +1401,31 @@ def section_raw(text, heading):
     return m.group(1).strip() if m else ""
 
 
+def nested_repos(root):
+    """Workspace detection: top-level folders that are their own git repo and that the workspace gitignores."""
+    out = []
+    for d in sorted(p for p in Path(root).iterdir() if p.is_dir() and not p.name.startswith(".")):
+        top = git("rev-parse", "--show-toplevel", cwd=d, check=False)
+        if top and Path(top).resolve() == d.resolve() and \
+                run(["git", "check-ignore", "-q", d.name], cwd=root, check=False).returncode == 0:
+            out.append(d.name)
+    return out
+
+
+def workspace_sections(paths):
+    """## Repos and ## Cross-repo rules drafts for upgrade; commands stay `none` until filled from each repo."""
+    blocks = "".join(f"### {p}\n- Role: unknown — owner to fill\n- Install: `none`\n- Build: `none`\n- Test: `none`\n"
+                     for p in paths)
+    return (f"## Repos\n<!-- One block per product repo; fill commands from its manifests/CI. -->\n{blocks}\n"
+            f"## Cross-repo rules\n- Order: {', '.join(paths)}   <!-- merge/ship order; first = earliest -->\n"
+            f"unknown — owner to fill\n")
+
+
 def merged_allow(existing, project_text):
-    """Template allow-list entries (with the project's commands filled in) missing from existing."""
+    """Template allow-list entries (with the project's and each product repo's commands) missing from existing."""
     tpl = json.loads((INIT_REFS / "claude-settings.json").read_text())["permissions"]["allow"]
     cmds = [project_command(n, project_text) for n in ("Install", "Build", "Test")]
+    cmds += [block_command(r["block"], n) for r in repos(project_text) for n in ("Install", "Build", "Test")]
     entries = []
     for e in tpl:
         entries += [f"Bash({c}:*)" for c in cmds if c] if e == "{{TEST_COMMANDS}}" else [e]
@@ -1435,6 +1456,10 @@ def cmd_upgrade(a):
     changed = []
     text, added = add_missing_sections(proj.read_text(), (INIT_REFS / "project-template.md").read_text(),
                                        owner_line(root))
+    nested = nested_repos(root) if not re.search(r"^##\s+Repos\s*$", text, re.M | re.I) else []
+    if nested:
+        text = text.rstrip("\n") + "\n\n" + workspace_sections(nested)
+        added += ["Repos", "Cross-repo rules"]
     if added:
         proj.write_text(text)
         changed.append(".agent-team/project.md")
