@@ -507,3 +507,39 @@ def test_audit_date_comes_from_report_name():
     assert "today's date" not in wf and "date in the report file name" in wf
     assert "date in the report file name" in read("skills/tech-lead/SKILL.md")
     assert "team-audit [quick\\|deep] [<category>]" in read("README.md")
+
+
+def test_pm_ideates_across_repos():
+    pm = read("skills/pm/SKILL.md")
+    assert "agent-team repos --log" in pm and "**Repos:**" in pm
+    assert "**Repos:**" in read("skills/pm/references/ideas-template.md")
+
+
+def test_workspace_mode_wired_in_skills():
+    tb = read("skills/team-build/SKILL.md")
+    lease = tb[tb.index("agent-team lease <slug> acquire"):]
+    assert lease.index("--takeover") < lease.index("agent-team repos <slug> --ensure")   # only once the lease is held
+    assert tb.count("agent-team repos <slug> --ensure") >= 3
+    assert "agent-team heads <slug>" in tb and "pr-body <slug> --repo" in tb and "-R <owner/repo>" in tb
+    assert "agent-team commit <slug>" in read("skills/developer/SKILL.md")
+    assert "Cross-repo rules" in read("skills/reviewer/SKILL.md")
+    assert "Spec problems" in read("skills/tech-lead/SKILL.md") and "## Repos" in read("skills/tech-lead/SKILL.md")
+    assert "repo_prs" in read("skills/team-wrap/SKILL.md")
+    assert "--summary '<3 lines>')\"` for each product PR" in tb and tb.index("repo_prs=") < tb.index("Then the workspace PR")
+    assert '"last_reviewed_commit=$(agent-team heads <slug>)"' in tb and tb.count("last_reviewed_commit=$(") == 3
+    assert '--since "<since>"' in read("skills/reviewer/SKILL.md")
+    assert tb.index("If it's rejected") < tb.index("Otherwise, in a workspace, run")
+    assert "Once you hold the lease, in a workspace (`project.md` has `## Repos`) run `agent-team repos <slug> --ensure`" in tb
+    assert "`<owner/repo>` = `repo=` and `<branch>` = `branch=`" in tb and "--log-failed`, with `-R <owner/repo>`" in tb
+    assert "-R <owner/repo> --json number" in tb
+    assert "plain `git add`/`git commit`" in read("skills/developer/SKILL.md")
+    assert "not `git log`" in read("skills/pm/SKILL.md")
+    assert "git -C" not in tb + read("skills/developer/SKILL.md") + read("skills/pm/SKILL.md")
+
+
+def test_team_build_pr_step_workspace_first_and_needs_github_remote():
+    tb = read("skills/team-build/SKILL.md")
+    pr = tb[tb.index("7. **pr**"):tb.index("8. **ci**")]
+    assert pr.index("In a workspace") < pr.index("if `gh pr view feature/<slug> --json number` finds a PR")
+    assert "(instead of the single-repo steps below)" in pr
+    assert "`repo=` is `-`" in pr and "has no GitHub remote" in pr
