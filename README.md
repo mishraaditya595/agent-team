@@ -30,6 +30,8 @@ flowchart LR
 
 The two 👤 steps are the only ones that need you. The one exception: if grilling the spec turns up a question that changes scope or what users see, the run stops and asks you in a **draft PR**. Smaller calls the agents make for you are listed in the PR. If something gets stuck, you get a draft PR explaining why, not a question in the middle of a run. If a run resumes after your default branch has changed the files its plan relies on, the Tech Lead updates the plan first.
 
+The agents follow the rules you already wrote for them in `AGENTS.md` / `CLAUDE.md`, on every tool. A product split across several repos inside one parent repo works too: one run, one PR per repo, merge order stated. See [docs/reference.md](docs/reference.md).
+
 ## 🚀 Get started
 
 **1. Install once per machine**

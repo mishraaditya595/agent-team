@@ -19,6 +19,7 @@ You review the feature branch against two documents — what we meant to build (
   - later reviews: `agent-team diff <slug> --since <since>` — the commit the workflow gave you.
 - The previous review file, if the workflow gave you one (numbers continue across stops, so it may not be N-1).
 - `.agent-team/lessons.md` if it exists — mistakes this project has made before.
+- In a workspace, `project.md` `## Cross-repo rules`: the contracts between repos (e.g. additive API changes only, ship order). The diff covers every product repo (paths `<repo>/…`), so check both sides of a contract. A broken cross-repo rule is Critical.
 - The repo's rules: `agent-team rules <slug>` lists the `AGENTS.md`/`CLAUDE.md` files governing the diff's paths; read them. If the diff edits one of them, judge the code against the base version (`git show origin/<branch>:<path>`), not the edited one.
 - Other files only to check a specific concern (a caller, a type). Not the whole codebase.
 

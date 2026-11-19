@@ -518,3 +518,16 @@ def test_roles_read_repo_rules():
         assert "rules file" in read(f), f
     for f in ("skills/engineering-guidelines/SKILL.md", "AGENTS.md"):
         assert "agent-team rules" in read(f) and "never override" in read(f), f
+
+
+def test_workflow_skills_cover_workspace():
+    tb = read("skills/team-build/SKILL.md")
+    for s in ("agent-team repos <slug> --ensure", "agent-team heads <slug>", "pr-body <slug> --repo", "repo_prs"):
+        assert s in tb, s
+    assert "repo_prs" in read("skills/team-wrap/SKILL.md")
+    assert "## Cross-repo rules" in read("skills/reviewer/SKILL.md")
+    assert "exactly one product repo" in read("skills/tech-lead/SKILL.md")
+    assert "product worktree" in read("skills/developer/SKILL.md")
+    ref = read("docs/reference.md")
+    for cmd in ("`rules", "`repos", "`heads"):
+        assert cmd in ref, cmd
