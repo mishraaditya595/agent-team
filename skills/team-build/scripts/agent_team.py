@@ -607,18 +607,47 @@ def exclude_specs(project_text=""):
     return [":(exclude).agent-team"] + [f":(exclude,glob){p}" for p in pats if p.lower() != "none"]
 
 
+def parse_since(since):
+    """last_reviewed_commit: a plain SHA (single repo, or the workspace itself) → {".": sha};
+    workspace form "api:abc app:def" → {"api": "abc", "app": "def"}; none → {}."""
+    if not since or since == "none":
+        return {}
+    if ":" not in since:
+        return {".": since}
+    return dict(p.split(":", 1) for p in since.split() if ":" in p)
+
+
 def diff_args(slug, since=None):
+    since = parse_since(since).get(".")
     rng = f"{since}..HEAD" if since else f"origin/{default_branch()}...HEAD"
     return [rng, "--", ".", *exclude_specs(project_md())]
 
 
-def diffstat(slug, since=None):
-    out = git("diff", "--shortstat", *diff_args(slug, since), cwd=work_dir(slug))
+def repo_diff(slug, r, since_map, extra):
+    """One product repo's part of the feature diff, paths shown as <repo>/…"""
+    since = since_map.get(r["path"])
+    rng = f"{since}..HEAD" if since else f"origin/{repo_branch(r)}...HEAD"
+    pre = [f"--src-prefix=a/{r['path']}/", f"--dst-prefix=b/{r['path']}/"] if not extra or extra == ["--unified=3"] else []
+    out = git("diff", *extra, *pre, rng, "--", ".", *exclude_specs(project_md()), cwd=product_wt(slug, r["path"]))
+    if extra == ["--name-only"]:
+        return "\n".join(f"{r['path']}/{l}" for l in out.splitlines() if l)
+    return out
+
+
+def _shortstat(out):
     files = re.search(r"(\d+) files? changed", out)
     ins = re.search(r"(\d+) insertions?", out)
     dels = re.search(r"(\d+) deletions?", out)
     n = lambda m: int(m.group(1)) if m else 0
     return n(ins) + n(dels), n(files)
+
+
+def diffstat(slug, since=None):
+    lines, files = _shortstat(git("diff", "--shortstat", *diff_args(slug, since), cwd=work_dir(slug)))
+    for r in status_repos(slug) if slug else []:
+        l, f = _shortstat(repo_diff(slug, r, parse_since(since), ["--shortstat"]))
+        lines, files = lines + l, files + f
+    return lines, files
 
 
 def code_key(wt):
@@ -677,6 +706,8 @@ def rule_files(root, paths, fallback=None):
 def feature_paths(slug):
     """Files the feature touches: its diff plus the plan's ## Files (which may not exist yet)."""
     paths = git("diff", "--name-only", *diff_args(slug), cwd=work_dir(slug)).splitlines()
+    for r in status_repos(slug):
+        paths += repo_diff(slug, r, {}, ["--name-only"]).splitlines()
     plan = feature_dir(work_dir(slug), slug) / "plan.md"
     return list(dict.fromkeys(paths + (plan_files(plan.read_text()) if plan.exists() else [])))
 
@@ -972,8 +1003,21 @@ def cmd_diff(a):
         lines, files = diffstat(a.slug, a.since)
         print(f"{lines} lines, {files} files")
         return
-    args = ["diff"] + (["--stat"] if a.stat else ["--unified=3"]) + diff_args(a.slug, a.since)
-    sys.stdout.write(git(*args, cwd=wt) + "\n")
+    extra = ["--stat"] if a.stat else ["--unified=3"]
+    parts = [git("diff", *extra, *diff_args(a.slug, a.since), cwd=wt)]
+    for r in status_repos(a.slug):
+        d = repo_diff(a.slug, r, parse_since(a.since), extra)
+        parts.append(f"# {r['path']}\n{d}" if a.stat else d)
+    sys.stdout.write("\n".join(p for p in parts if p) + "\n")
+
+
+def cmd_heads(a):
+    """The value for last_reviewed_commit: the worktree's short HEAD, or in a workspace one <repo>:<sha> per repo."""
+    rs = status_repos(a.slug)
+    if not rs:
+        print(git("rev-parse", "--short", "HEAD", cwd=work_dir(a.slug)))
+        return
+    print(" ".join(f"{r['path']}:{git('rev-parse', '--short', 'HEAD', cwd=product_wt(a.slug, r['path']))}" for r in rs))
 
 
 def cmd_test(a):
@@ -982,21 +1026,27 @@ def cmd_test(a):
         raise Fail(f"no worktree at {wt}")
     text = project_md()
     p = feature_dir(wt, a.slug) / "status.md"
-    key = code_key(wt)
-    cmds = (project_command("Build", text) or "") + "\n" + (project_command("Test", text) or "")
+    # (label, cwd, block of commands): the workspace itself, then each product repo in a workspace
+    parts = [("", wt, section(text, "Build & test"))]
+    parts += [(f"{r['path']}:", product_wt(a.slug, r["path"]), r["block"]) for r in status_repos(a.slug)]
+    keys = [code_key(cwd) for _, cwd, _ in parts]
+    key = "+".join(keys) if all(keys) else None
+    cmds = "\n".join((block_command(b, "Build") or "") + "\n" + (block_command(b, "Test") or "") for _, _, b in parts)
     if key:
         key += "+" + hashlib.sha1(cmds.encode()).hexdigest()[:6]
     cached = read_status(p).get("tests", "none")
     if key and not a.force and not a.build and cached.split(" ")[0] == key:
         print(f"tests (cached for {key}): {cached.split(' ', 1)[1]}")
         return 0 if cached.endswith("pass") else 1
-    steps = ([("Build", project_command("Build", text))] if a.build else []) + [("Test", project_command("Test", text))]
-    for name, cmd in steps:
+    steps = [(label + name, cwd, block_command(b, name)) for label, cwd, b in parts
+             for name in (("Build", "Test") if a.build else ("Test",))]
+    for name, cwd, cmd in steps:
         if not cmd:
-            print(f"{name}: none configured in project.md")
+            if ":" not in name:
+                print(f"{name}: none configured in project.md")
             continue
         print(f"$ {cmd}")
-        r = run(cmd, cwd=wt, check=False, shell=True)
+        r = run(cmd, cwd=cwd, check=False, shell=True)
         out = (r.stdout + r.stderr).strip().splitlines()
         if r.returncode:
             print("\n".join(out[-40:]))
@@ -1597,6 +1647,8 @@ def build_parser():
     s.add_argument("slug"); s.add_argument("--since", metavar="SHA")
     s.add_argument("--stat", action="store_true"); s.add_argument("--shortstat", action="store_true")
     s.set_defaults(fn=cmd_diff)
+    s = sub.add_parser("heads", help="the value for last_reviewed_commit (per repo in a workspace)")
+    s.add_argument("slug"); s.set_defaults(fn=cmd_heads)
     s = sub.add_parser("test", help="run project tests in the worktree; cached per code commit")
     s.add_argument("slug"); s.add_argument("--build", action="store_true", help="run Build first")
     s.add_argument("--force", action="store_true"); s.set_defaults(fn=cmd_test)

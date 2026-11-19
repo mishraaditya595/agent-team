@@ -216,3 +216,89 @@ def test_single_repo_status_and_ensure_unchanged(repo, capsys):
     assert "repos:" not in before
     assert out(capsys, "repos", "tiny", "--ensure")[1] == "single-repo"
     assert (fd / "status.md").read_text() == before
+
+
+# ---------- Task 7: test, diff, heads, --since ----------
+
+def commit(d, name, text="x\n", msg="change"):
+    (d / name).write_text(text)
+    sh("git", "add", "-A", cwd=d); sh("git", "commit", "-qm", msg, cwd=d)
+    return sh("git", "rev-parse", "--short", "HEAD", cwd=d)
+
+
+@pytest.fixture
+def ws_feature(feature, capsys):
+    wt, fd = feature
+    assert at.main(["repos", "xr", "--ensure"]) == 0
+    capsys.readouterr()
+    return wt, fd
+
+
+def test_ws_diff_prefixes_paths(ws_feature, capsys):
+    wt, _ = ws_feature
+    commit(wt / "api", "src.txt", "changed\n")
+    o = out(capsys, "diff", "xr")[1]
+    assert "a/api/src.txt" in o and "b/api/src.txt" in o and "+changed" in o
+    stat = out(capsys, "diff", "xr", "--stat")[1]
+    assert "# api" in stat and "src.txt" in stat
+
+
+def test_ws_diff_since_per_repo_and_plain_sha(ws_feature, capsys):
+    wt, _ = ws_feature
+    c1 = commit(wt / "api", "one.txt")
+    commit(wt / "api", "two.txt")
+    o = out(capsys, "diff", "xr", "--since", f"api:{c1}", "--stat")[1]
+    assert "two.txt" in o and "one.txt" not in o
+    ws_head = sh("git", "rev-parse", "--short", "HEAD", cwd=wt)
+    for since in (ws_head, f"app:{c1}"):          # old plain SHA, or no entry for api → api diffs against its base
+        o = out(capsys, "diff", "xr", "--since", since, "--stat")[1]
+        assert "one.txt" in o and "two.txt" in o, since
+
+
+def test_ws_shortstat_sums(ws_feature, capsys):
+    wt, _ = ws_feature
+    commit(wt / "api", "a.txt", "1\n2\n")
+    commit(wt / "app", "b.txt", "1\n") if (wt / "app").exists() else None
+    assert out(capsys, "diff", "xr", "--shortstat")[1] == "2 lines, 1 files"
+    assert at.diffstat("xr") == (2, 1)
+
+
+def set_repo_test(ws, path, cmd):
+    assert path == "api"
+    p = ws / ".agent-team" / "project.md"
+    p.write_text(p.read_text().replace("- Install: `npm ci`\n- Test: `true`", f"- Install: `npm ci`\n- Test: `{cmd}`"))
+
+
+def test_ws_test_runs_each_repo_and_caches(ws_feature, workspace, capsys):
+    set_repo_test(workspace, "api", "echo api-ran")
+    code, o, _ = out(capsys, "test", "xr")
+    assert code == 0 and "$ echo api-ran" in o and "api-ran" in o and "tests: pass" in o
+    code, o, _ = out(capsys, "test", "xr")
+    assert code == 0 and "cached" in o
+
+
+def test_ws_test_failure_names_repo(ws_feature, workspace, capsys):
+    wt, fd = ws_feature
+    set_repo_test(workspace, "api", "false")
+    code, o, _ = out(capsys, "test", "xr")
+    assert code == 1 and "api:Test: FAILED" in o
+    assert at.read_status(fd / "status.md")["tests"].endswith("fail(api:test)")
+
+
+def test_heads_format(ws_feature, repo, capsys):
+    wt, _ = ws_feature
+    c = commit(wt / "api", "h.txt")
+    assert out(capsys, "heads", "xr")[1] == f"api:{c}"
+
+
+def test_heads_single_repo(repo, capsys):
+    wt, _ = new_feature(repo)
+    assert out(capsys, "heads", "tiny")[1] == sh("git", "rev-parse", "--short", "HEAD", cwd=wt)
+
+
+def test_rules_slug_reaches_product_and_workspace_rules(ws_feature, workspace, capsys):
+    wt, _ = ws_feature
+    commit(wt, "AGENTS.md", "ws rules\n")
+    commit(wt / "api", "AGENTS.md", "api rules\n")
+    commit(wt / "api", "src.txt", "changed\n")
+    assert out(capsys, "rules", "xr")[1] == "AGENTS.md\napi/AGENTS.md"
