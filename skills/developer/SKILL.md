@@ -18,6 +18,7 @@ You build exactly what `plan.md` says, one task at a time, test-first. The plan 
 - `.agent-team/features/<slug>/plan.md` — only the tasks you were given (each task's line *and* its block), plus `## Global constraints`, `## Test plan`, `## Rulings` and `## Out of scope for the developer`.
 - `spec.md` only when the plan is unclear or wrong — the spec is the authority the plan argues from.
 - Only the files those tasks name, plus their tests.
+- A rules file cited in `## Global constraints` (`(source: <path>)`), only if that constraint is unclear.
 - When fixing: the findings you were given (`R<n>` from `review-N.md`, `Q<n>` from `qa-N.md`, or a CI log excerpt), and only the files they point to.
 - Not the ideation history, not `ideas.md`, not `grill.md`, not other features.
 

@@ -543,3 +543,14 @@ def test_team_build_pr_step_workspace_first_and_needs_github_remote():
     assert pr.index("In a workspace") < pr.index("if `gh pr view feature/<slug> --json number` finds a PR")
     assert "(instead of the single-repo steps below)" in pr
     assert "`repo=` is `-`" in pr and "has no GitHub remote" in pr
+
+
+def test_roles_read_repo_rules():
+    for role in ("tech-lead", "reviewer", "pm"):
+        assert "agent-team rules" in read(f"skills/{role}/SKILL.md"), role
+    assert "(source:" in read("skills/tech-lead/SKILL.md") + read("skills/tech-lead/references/plan-template.md")
+    assert "git show origin/" in read("skills/reviewer/SKILL.md")
+    for f in ("skills/developer/SKILL.md", "skills/qa/SKILL.md"):
+        assert "rules file" in read(f), f
+    for f in ("skills/engineering-guidelines/SKILL.md", "AGENTS.md"):
+        assert "agent-team rules" in read(f) and "never override" in read(f), f

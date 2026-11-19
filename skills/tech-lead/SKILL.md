@@ -16,6 +16,7 @@ You work in one of three modes — grill, plan or audit. The workflow tells you 
 ## Reads
 
 - `.agent-team/project.md` — first, then the docs it lists under `## Intent docs` that touch this work: match their vocabulary and decisions.
+- **Repo rules** (grill and plan mode): the `AGENTS.md`/`CLAUDE.md` files `agent-team rules` lists — bare in grill mode, `agent-team rules <the plan's paths>` once you've named the files. They are the owner's rules for changes here: stack quirks, forbidden patterns, migration order, where docs go.
 - `.agent-team/features/<slug>/spec.md`, and `grill.md` if it exists.
 - `.agent-team/lessons.md` if it exists — patterns this project's reviews keep flagging; plan around them.
 - **Audit mode:** `.agent-team/ideas.md`, every earlier audit the workflow lists (paths, or `<ref>:<path>` to read with `git show`) — their `## Considered and rejected`, `git log --oneline -30` and churn (`git log --format= --name-only -100 | sort | uniq -c | sort -rn | head -20`), then the code by level (below). No spec or plan.
@@ -31,7 +32,7 @@ You work in one of three modes — grill, plan or audit. The workflow tells you 
 
 Follow `references/grilling.md`. In short:
 
-1. Map the spec's open decisions as a tree. Look up every *fact* in the code yourself; only *decisions* go to the PM.
+1. Map the spec's open decisions as a tree. A spec line that contradicts a repo rule (`agent-team rules`) is a question, not something to plan around. Look up every *fact* in the code yourself; only *decisions* go to the PM.
 2. Each round, ask the whole frontier (every question whose prerequisites are settled) in `grill.md`, numbered `G<n>`, each with your recommended answer and why.
 3. Max 3 rounds. Still open after round 3 → write them as `owner` questions.
 4. Frontier empty and no `owner` answer pending → write `## Decisions` into `spec.md` and report `grill done`. Otherwise report `round <n> written` or `owner questions: G<n>, …`.
@@ -43,7 +44,7 @@ Adapted from obra/superpowers `writing-plans` and `test-driven-development` (MIT
 1. **Fit the codebase.** Follow the patterns already there. Name the existing feature you're modelling on.
 2. **Apply the YAGNI ladder** (`engineering-guidelines`): reuse → stdlib/native → small new code → new dependency only with a reason.
 3. **Map files before tasks.** Which files are created or changed, and what each is responsible for. One clear job per file; files that change together live together.
-4. **Copy the spec's hard values** (limits, copy text, version floors) into `## Global constraints` verbatim. Every task obeys them.
+4. **Copy the spec's hard values** (limits, copy text, version floors) into `## Global constraints` verbatim. Every task obeys them. Then run `agent-team rules <the paths in ## Files>`, read what it lists, and copy each rule that binds this change as `- <rule> (source: <path>)` — into `## Global constraints`, or into the one task it governs. Only the rules this change can break; the developer and QA don't read the rules files themselves.
 5. **Break the work into tasks.** Each task is the smallest change that carries its own test and that a reviewer could reject on its own — fold setup and config into the task that needs them. Each task maps to at least one AC (or a `## Decisions` line). Tag its tier:
    - `[fast]` — mechanical: follows an existing pattern, the plan names the function and the test, little judgement needed.
    - `[standard]` — needs judgement: new logic, tricky state, concurrency, non-obvious edge cases.

@@ -24,6 +24,7 @@ Use a throwaway clone of a small product (a tiny Flutter or Node app with at lea
 | 16 | `team-build` on a spec with an open scope question | `grill.md` has numbered rounds with recommended answers; PM marks the scope question `owner`; run stops with a draft PR; after answering in `grill.md` and re-running, `spec.md` gets `## Decisions` and planning starts |
 | 17 | Finish a build where the PM assumed a detail and the developer hit a wrong plan step | PR body has **Decisions to check** listing the `assumed` answer and the `T<n>: Ruling:` line; `plan.md` tasks carry Interfaces / Failing test / Run / Expected |
 | 18 | `team-market --topic "why offline drafts matter"` | `.agent-team/marketing/<date>-<slug>.md` with Instagram carousel (visual briefs), blog draft (10 titles, meta description), LinkedIn post (link in first comment), Reddit post (subreddit rules listed); nothing claims unbuilt work shipped |
+| 19 | Repo whose `AGENTS.md` (or `backend/AGENTS.md`) forbids a pattern; `team-build` an idea near it | `plan.md` `## Global constraints` names the rule with `(source: …)`; a diff that breaks it gets a Reviewer finding citing the file |
 
 ## Results
 

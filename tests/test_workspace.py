@@ -464,3 +464,27 @@ def test_commit_staging_failure_unstages_earlier_repos(ws):
     (wt / "app-backend/a.txt").write_text("a")
     assert at.main(["commit", "both", "-m", "x", "app-backend/a.txt", "app-flutter/typo.txt"]) == 1
     assert sh("git", "diff", "--cached", "--name-only", cwd=wt / "app-backend") == ""
+
+
+# ---------- agent rules in a workspace (#11) ----------
+
+def test_rules_noarg_includes_each_repo_root(ws, capsys):
+    (ws / "AGENTS.md").write_text("ws\n")
+    (ws / "app-backend" / "AGENTS.md").write_text("api\n")
+    (ws / "app-backend" / "deep").mkdir()
+    (ws / "app-backend" / "deep" / "AGENTS.md").write_text("deep\n")
+    capsys.readouterr()
+    assert at.main(["rules"]) == 0
+    assert capsys.readouterr().out.strip() == "AGENTS.md\napp-backend/AGENTS.md"
+
+
+def test_rules_slug_reaches_product_and_workspace_rules(ws, capsys):
+    wt = new_ws_feature(ws)
+    (wt / "AGENTS.md").write_text("ws rules\n")
+    p = wt / "app-backend"
+    (p / "AGENTS.md").write_text("api rules\n")
+    (p / "api.txt").write_text("changed\n")
+    sh("git", "add", "-A", cwd=p); sh("git", "commit", "-qm", "change", cwd=p)
+    capsys.readouterr()
+    assert at.main(["rules", "both"]) == 0
+    assert capsys.readouterr().out.strip() == "AGENTS.md\napp-backend/AGENTS.md"

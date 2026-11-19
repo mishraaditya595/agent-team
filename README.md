@@ -28,7 +28,7 @@ flowchart LR
     H --> I["📣 Launch drafts"]
 ```
 
-The two 👤 steps are the only ones that need you. The one exception: if grilling the spec turns up a question that changes scope or what users see, the run stops and asks you in a **draft PR**. Smaller calls the agents make for you are listed in the PR. If something gets stuck, you get a draft PR explaining why, not a question in the middle of a run. If a run resumes after your default branch has changed the files its plan relies on, the Tech Lead updates the plan first.
+The two 👤 steps are the only ones that need you. The one exception: if grilling the spec turns up a question that changes scope or what users see, the run stops and asks you in a **draft PR**. Smaller calls the agents make for you are listed in the PR. If something gets stuck, you get a draft PR explaining why, not a question in the middle of a run. If a run resumes after your default branch has changed the files its plan relies on, the Tech Lead updates the plan first. The agents also follow the rules you already wrote for them in `AGENTS.md` / `CLAUDE.md`, on every tool.
 
 ## 🚀 Get started
 

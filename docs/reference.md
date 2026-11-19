@@ -36,6 +36,10 @@ Anytime: `team-market --topic "<idea, plan path or topic>" [--channels instagram
 
 If `main` is branch-protected (or `project.md` `## Conventions` has `- docs-push: pr-only`, for owners who want every agent-team docs push reviewed), `team-init`, `team-ideate`, `team-wrap` and `team-market` push their docs to an `agent-team/meta` branch and open a PR for it instead. Your local `main` never gets a commit of its own. While a meta PR is open, the workflows also put its newer docs into your checkout as uncommitted copies; to update `main` in that repo, use **`agent-team pull`** rather than `git pull` — it puts back copies nobody edited, so the fast-forward works after a squash merge (manual fix if needed: `git checkout -- .agent-team`). Merge the setup PR before the first `team-build`.
 
+## Repo rules (`AGENTS.md` / `CLAUDE.md`)
+
+If your repo keeps rules for agents in `AGENTS.md`/`CLAUDE.md` (at the root or in subfolders), the roles follow them without relying on the tool to load them: the Tech Lead copies the rules that bind a change into the plan's `## Global constraints` (citing the file), the Reviewer checks the diff against them, and the PM doesn't spec against them. `agent-team rules` finds them.
+
 ## The helper CLI
 
 The workflows hand every deterministic step to `agent-team` (stdlib Python, `skills/team-build/scripts/agent_team.py`) instead of having the model work it out each time — cheaper and exact:
@@ -57,6 +61,7 @@ The workflows hand every deterministic step to `agent-team` (stdlib Python, `ski
 | `cleanup <slug> [--remote]` | post-merge cleanup; refuses if it would lose uncommitted or unpushed work, and `--remote` deletes the remote branch only if it was merged (`--force` to override) |
 | `pull` / `docs-pull` / `docs-commit` | agent-team docs are committed from a temporary worktree — never on your local default branch — to `main`, or to `agent-team/meta` + PR when `main` is protected or `docs-push: pr-only` is set; `pull` replaces `git pull` in the workflows |
 | `upgrade` | adds missing `project.md` sections and permissions to a repo set up by an older version |
+| `rules [<slug>\|<path>…]` | the repo's `AGENTS.md`/`CLAUDE.md` files governing a feature's paths (subfolders, nested product repos, the workspace root), so roles follow them on every tool |
 
 ## Workspaces
 
