@@ -869,6 +869,11 @@ def cmd_drift(a):
         raise Fail(f"{plan} is missing")
     text = plan.read_text()
     sha = planned_at(text)
+    if status_repos(a.slug):
+        # ponytail: planned-at is a workspace SHA and the plan's files live in product repos; add a per-repo
+        # planned-at when stale cross-repo plans actually bite.
+        print("drift: unchecked (workspace mode)")
+        return 0
     if not sha:
         print("drift: unchecked (no planned-at line in plan.md; written before drift checks)")
         return 0
@@ -1320,43 +1325,60 @@ def merged_pr_head(pr, cwd):
     return oid if r.returncode == 0 and state == "MERGED" and oid else None
 
 
-def cmd_cleanup(a):
-    """Remove a feature's worktree and branches — only when nothing would be lost (or --force)."""
-    root = repo_root()
-    wt = worktree(a.slug)
-    branch = f"feature/{a.slug}"
-    sp = status_path(a.slug)
-    pr = read_status(sp).get("pr", "none") if sp.exists() else "none"
+def _cleanup_one(root, wt, branch, pr, remote, label=""):
+    """Checks and actions for removing one repo's feature worktree and branches. root: the repo whose .git owns
+    the worktree. Returns (problems, act)."""
     git("fetch", "-q", "--prune", "origin", cwd=root, check=False)
     pr_head = merged_pr_head(pr, root)
     problems = []
     if wt.exists() and git("status", "--porcelain", cwd=wt):
-        problems.append(f"uncommitted changes in {wt} — commit or discard them")
+        problems.append(f"{label}uncommitted changes in {wt} — commit or discard them")
     tip = git("rev-parse", "--verify", "-q", f"refs/heads/{branch}", cwd=root, check=False)
     if tip and tip != pr_head and not git("branch", "-r", "--contains", tip, cwd=root, check=False):
         n = git("rev-list", "--count", tip, "--not", "--remotes", cwd=root, check=False)
-        problems.append(f"{n} commit(s) on {branch} are not on the remote and not in a merged PR — push them")
+        problems.append(f"{label}{n} commit(s) on {branch} are not on the remote and not in a merged PR — push them")
     remote_tip = git("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}", cwd=root, check=False)
-    if a.remote and remote_tip:
+    if remote and remote_tip:
         try:
             in_default = _is_ancestor(remote_tip, f"origin/{default_branch(root)}", root)
         except Fail:
             in_default = False
         if remote_tip != pr_head and not in_default:
-            problems.append(f"origin/{branch} is not merged (no merged PR with that head, and not in the "
+            problems.append(f"{label}origin/{branch} is not merged (no merged PR with that head, and not in the "
                             f"default branch) — merge its PR first, or run without --remote")
+
+    def act():
+        if wt.exists():
+            git("worktree", "remove", "--force", str(wt), cwd=root)
+            print(f"{label}removed worktree {wt}")
+        if tip:
+            git("branch", "-D", branch, cwd=root)
+            print(f"{label}deleted local {branch}")
+        if remote and remote_tip:
+            git("push", "origin", "--delete", branch, cwd=root)
+            print(f"{label}deleted origin/{branch}")
+    return problems, act
+
+
+def cmd_cleanup(a):
+    """Remove a feature's worktree and branches — only when nothing would be lost (or --force). In a workspace,
+    every product repo's too (products first: their worktrees sit inside the workspace one)."""
+    root = repo_root()
+    branch = f"feature/{a.slug}"
+    sp = status_path(a.slug)
+    st = read_status(sp) if sp.exists() else {}
+    prs = dict(parse_repo_prs(st.get("repo_prs")))
+    rs = status_repos(a.slug) or ([r for r in repos() if product_wt(a.slug, r["path"]).exists()]
+                                  if read_doc(".agent-team/project.md") is not None else [])
+    jobs = [_cleanup_one(repo_dir(r["path"]), product_wt(a.slug, r["path"]), branch, prs.get(r["path"], "none"),
+                         a.remote, f"{r['path']}: ") for r in rs]
+    jobs.append(_cleanup_one(root, worktree(a.slug), branch, st.get("pr", "none"), a.remote))
+    problems = [p for ps, _ in jobs for p in ps]
     if problems and not a.force:
         raise Fail("not cleaning up: " + "; ".join(problems) + ". Rerun with --force only if that's really "
                    "what you want.")
-    if wt.exists():
-        git("worktree", "remove", "--force", str(wt), cwd=root)
-        print(f"removed worktree {wt}")
-    if tip:
-        git("branch", "-D", branch, cwd=root)
-        print(f"deleted local {branch}")
-    if a.remote and remote_tip:
-        git("push", "origin", "--delete", branch, cwd=root)
-        print(f"deleted origin/{branch}")
+    for _, act in jobs:
+        act()
 
 
 # ---------- docs commits (never on the local default branch) ----------

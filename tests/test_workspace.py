@@ -419,3 +419,33 @@ def test_summary_shows_repo_prs(ws_feature, capsys):
     sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "st", cwd=wt)
     sh("git", "push", "-q", "-u", "origin", "feature/xr", cwd=wt)
     assert "| api#12 ws#5 |" in out(capsys, "summary")[1]
+
+
+# ---------- Task 10: cleanup, drift ----------
+
+def test_ws_cleanup_removes_products_then_workspace(ws_feature, workspace, capsys):
+    wt, _ = ws_feature
+    commit(wt / "api", "c.txt")
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
+    assert at.main(["push", "xr"]) == 0
+    code, o, err = out(capsys, "cleanup", "xr")
+    assert code == 0, err
+    assert o.index("api: removed worktree") < o.index("removed worktree " + str(wt))
+    assert not wt.exists()
+    assert branches(workspace / "api") == [] and branches(workspace) == []
+
+
+def test_ws_cleanup_refuses_unpushed_product_commit(ws_feature, workspace, capsys):
+    wt, _ = ws_feature
+    sh("git", "add", "-A", cwd=wt); sh("git", "commit", "-qm", "status", cwd=wt)
+    assert at.main(["push", "xr"]) == 0
+    commit(wt / "api", "c.txt")
+    code, _, err = out(capsys, "cleanup", "xr")
+    assert code == 1 and "api: 1 commit(s) on feature/xr" in err
+    assert (wt / "api" / "c.txt").exists() and branches(workspace / "api") == ["feature/xr"]
+
+
+def test_ws_drift_unchecked(ws_feature, capsys):
+    wt, fd = ws_feature
+    (fd / "plan.md").write_text("planned-at: abc1234\n" + (fd / "plan.md").read_text() + "\n## Files\n- `api/src.txt` — m — x\n")
+    assert out(capsys, "drift", "xr")[1] == "drift: unchecked (workspace mode)"
